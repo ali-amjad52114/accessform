@@ -1513,3 +1513,11 @@ kbd {
   .af-cv-bar i, .af-cv-side, .af-cv-chev { transition: none; }
   .af-cv-spin { animation: none; }
 }
+
+/* approve and send */
+.af-cv-approve { display: grid; gap: 10px; margin-top: 14px; justify-items: start; }
+.af-cv-receipt { padding: 10px 12px; border-radius: 10px; font-weight: 600; font-size: 16px; }
+.af-cv-receipt--ok { background: var(--cv-ok-bg); color: var(--cv-ok-ink); }
+.af-cv-receipt--warn { background: var(--cv-warn-bg); color: var(--cv-warn-ink); }
+.af-cv-confirm { display: grid; gap: 10px; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--af-border); background: var(--af-bg); font-size: 16px; }
+.af-cv-confirm__row { display: flex; gap: 10px; flex-wrap: wrap; }
