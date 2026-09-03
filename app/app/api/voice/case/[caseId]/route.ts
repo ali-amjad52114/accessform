@@ -27,15 +27,19 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ caseId: string }> },
 ): Promise<Response> {
   const { caseId } = await context.params;
   const xano = getXanoAdapter();
+  // `?light=1`: the bundle only (transcript, events, documents, deliveries).
+  // Xano's progress endpoint costs ~2.5 s, so a page polling every 2 s asks
+  // for it only every few reads and keeps the last value in between.
+  const light = new URL(request.url).searchParams.get('light') === '1';
 
   try {
     const bundle = await xano.getCase(caseId);
-    const progress = await xano.getCaseProgress(caseId).catch(() => computeProgress(bundle));
+    const progress = light ? null : await xano.getCaseProgress(caseId).catch(() => computeProgress(bundle));
     const completeness = computeCompleteness(bundle);
     return NextResponse.json({
       bundle,

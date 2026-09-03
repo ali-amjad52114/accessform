@@ -16,7 +16,7 @@ import { formatDay } from './timeline-model';
 
 /** Newest cases pulled from the system of record for the list. */
 const RECENT_CASES = 8;
-const HISTORY_REFRESH_MS = 10_000;
+const HISTORY_REFRESH_MS = 15_000;
 
 /**
  * Conversation history for this browser. The id list is localStorage; the

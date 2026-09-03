@@ -39,6 +39,8 @@ export interface UseCaseStateResult {
 
 const POLL_MS = 2000;
 const IDLE_POLL_MS = 4000;
+/** One full read (with Xano progress) per this many polls. */
+const FULL_EVERY = 4;
 const SETTLE_MS = 900;
 
 export function useCaseState(caseId: Id, active: boolean): UseCaseStateResult {
@@ -48,11 +50,17 @@ export function useCaseState(caseId: Id, active: boolean): UseCaseStateResult {
   const inFlight = useRef(false);
   const mounted = useRef(true);
 
+  /** Every Nth read asks Xano for progress; the others are light. */
+  const reads = useRef(0);
+  const lastProgress = useRef<CaseProgress | null>(null);
+
   const refresh = useCallback(async () => {
     if (inFlight.current) return;
     inFlight.current = true;
+    const full = reads.current % FULL_EVERY === 0;
+    reads.current += 1;
     try {
-      const response = await fetch(`/api/voice/case/${encodeURIComponent(caseId)}`, {
+      const response = await fetch(`/api/voice/case/${encodeURIComponent(caseId)}${full ? '' : '?light=1'}`, {
         cache: 'no-store',
       });
       let payload: unknown = null;
@@ -72,9 +80,10 @@ export function useCaseState(caseId: Id, active: boolean): UseCaseStateResult {
         setError('The server returned an incomplete conversation.');
         return;
       }
+      if (record.progress) lastProgress.current = record.progress;
       setData({
         bundle: record.bundle,
-        progress: record.progress ?? null,
+        progress: record.progress ?? lastProgress.current,
         completeness: record.completeness ?? null,
         events: Array.isArray(record.events) ? record.events : record.bundle.events ?? [],
         documentUrl: typeof record.documentUrl === 'string' && record.documentUrl ? record.documentUrl : null,

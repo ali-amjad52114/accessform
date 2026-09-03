@@ -28,18 +28,46 @@ const MAX_RECENT = 30;
  * Ids of the newest cases in the system of record, via Xano `GET /cases`.
  * Empty (never fixture ids) when Xano is not configured or the read fails.
  */
-async function recentCaseIds(limit: number): Promise<Id[]> {
+interface RecentRow {
+  id?: unknown;
+  created_at?: unknown;
+  status?: unknown;
+  situation_text?: unknown;
+  delivery_status?: unknown;
+  caller_phone_last4?: unknown;
+}
+
+function str(value: unknown): string {
+  return typeof value === 'string' ? value : typeof value === 'number' ? String(value) : '';
+}
+
+/**
+ * The newest cases straight from Xano `GET /cases` — ONE call, the list's own
+ * columns, no per-case bundle or progress reads. Progress for the sidebar is
+ * not worth 3 s of Xano time per case; the conversation page shows it.
+ * Empty (never fixture rows) when Xano is not configured or the read fails.
+ */
+async function recentSummaries(limit: number): Promise<CaseSummary[]> {
   const creds = xanoCredentials();
   if (!creds) return [];
   try {
-    const payload = await requestJson<{ cases?: { id?: unknown }[] }>('xano', 'listCases', `${creds.baseUrl}/cases`, {
+    const payload = await requestJson<{ cases?: RecentRow[] }>('xano', 'listCases', `${creds.baseUrl}/cases`, {
       query: { limit },
       headers: creds.apiKey ? { Authorization: `Bearer ${creds.apiKey}` } : {},
       timeoutMs: 15_000,
     });
     return (payload.cases ?? [])
-      .map((row) => (typeof row.id === 'number' || typeof row.id === 'string' ? String(row.id) : ''))
-      .filter((id) => id.length > 0);
+      .filter((row) => str(row.id).length > 0)
+      .map((row) => ({
+        id: str(row.id),
+        situation_text: str(row.situation_text),
+        organization_name: null,
+        program_name: null,
+        status: (str(row.status) || 'CREATED') as CaseStatus,
+        created_at: typeof row.created_at === 'number' ? new Date(row.created_at).toISOString() : str(row.created_at),
+        delivery_status: (str(row.delivery_status) || 'none') as CaseDeliveryStatus,
+        caller_phone_last4: str(row.caller_phone_last4) || null,
+      }));
   } catch (error) {
     console.warn('[cases] summary: recent list unavailable —', (error as Error).message);
     return [];
@@ -117,10 +145,11 @@ export async function GET(request: Request): Promise<Response> {
   const requested = parseIds(params.get('ids'));
   const recentRaw = Number(params.get('recent') ?? '0');
   const recentLimit = Number.isFinite(recentRaw) ? Math.min(MAX_RECENT, Math.max(0, Math.floor(recentRaw))) : 0;
-  const recent = recentLimit > 0 ? await recentCaseIds(recentLimit) : [];
-  // Recent first, then anything this browser remembers that is not already listed.
-  const ids = Array.from(new Set([...recent, ...requested])).slice(0, MAX_IDS + MAX_RECENT);
-  const cases: CaseSummary[] = [];
+  const recent = recentLimit > 0 ? await recentSummaries(recentLimit) : [];
+  const listed = new Set(recent.map((row) => row.id));
+  // Only ids this browser remembers that the recent list did not cover need a full read.
+  const ids = requested.filter((id) => !listed.has(id));
+  const cases: CaseSummary[] = [...recent];
 
   for (let start = 0; start < ids.length; start += CONCURRENCY) {
     const chunk = ids.slice(start, start + CONCURRENCY);
