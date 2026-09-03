@@ -98,9 +98,23 @@ function actorToSpeaker(actor: string): TurnSpeaker | null {
   return null;
 }
 
-function compareByTime(a: { timestamp: string }, b: { timestamp: string }): number {
-  const ta = Date.parse(a.timestamp);
-  const tb = Date.parse(b.timestamp);
+/**
+ * Event times arrive as ISO strings from the contract but as epoch
+ * milliseconds (number, or a numeric string) straight from Xano. Accept all.
+ */
+export function toMillis(value: unknown): number {
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    if (/^\d{10,}$/.test(value)) return Number(value);
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? Number.NaN : parsed;
+  }
+  return Number.NaN;
+}
+
+function compareByTime(a: { timestamp: unknown }, b: { timestamp: unknown }): number {
+  const ta = toMillis(a.timestamp);
+  const tb = toMillis(b.timestamp);
   if (Number.isNaN(ta) || Number.isNaN(tb)) return 0;
   return ta - tb;
 }
@@ -194,10 +208,10 @@ export function buildTimeline(
     const next = cards.find(
       (other) => other.card === card.card && compareByTime(other, card) > 0 && other !== card,
     );
-    const from = Date.parse(card.timestamp);
-    const to = next ? Date.parse(next.timestamp) : Number.POSITIVE_INFINITY;
+    const from = toMillis(card.timestamp);
+    const to = next ? toMillis(next.timestamp) : Number.POSITIVE_INFINITY;
     card.events = sorted.filter((event) => {
-      const at = Date.parse(event.timestamp);
+      const at = toMillis(event.timestamp);
       return at >= from && at < to;
     });
   }
@@ -472,15 +486,15 @@ export function sectionsWithFields(sections: unknown): SectionWithFields[] {
 /* Small formatting helpers shared by the cards                        */
 /* ------------------------------------------------------------------ */
 
-export function formatClock(iso: string): string {
-  const date = new Date(iso);
+export function formatClock(iso: string | number): string {
+  const date = new Date(toMillis(iso));
   if (Number.isNaN(date.getTime())) return '';
   return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
-export function formatDay(iso: string | null | undefined): string {
+export function formatDay(iso: string | number | null | undefined): string {
   if (!iso) return '';
-  const date = new Date(iso);
+  const date = new Date(toMillis(iso));
   if (Number.isNaN(date.getTime())) return '';
   const now = new Date();
   const sameDay =
