@@ -2,11 +2,11 @@ import { Card } from './Card';
 
 /** The five things AccessForm does, in order — for any need, any official form. */
 export const WHAT_HAPPENS_STEPS = [
-  'Tell us about the bill',
-  'We find your hospital’s official assistance form',
-  'Answer a few questions by voice',
-  'We fill the hospital’s real PDF',
-  'You get it by text, with what’s still missing',
+  'Find hospitals near you that offer financial assistance',
+  'Find that hospital’s official application form',
+  'Fill it in by voice — a few questions, one at a time',
+  'Review the filled form from a text link',
+  'Send it to the hospital yourself, in one step',
 ] as const;
 
 export function WhatHappensCard() {
