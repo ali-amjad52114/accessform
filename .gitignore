@@ -21,3 +21,6 @@ app/tsconfig.tsbuildinfo
 
 # Runtime form-schema cache (per PDF hash)
 app/.formcache/
+
+# Runtime nearby-organizations cache (per category + location)
+app/.nearbycache/
