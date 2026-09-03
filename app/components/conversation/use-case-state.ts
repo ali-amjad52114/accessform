@@ -15,6 +15,7 @@ import type {
   CompletenessSummary,
   Id,
 } from '../../lib/contract';
+import { toMillis } from './timeline-model';
 
 export interface CaseStatePayload {
   bundle: CaseBundle;
@@ -37,8 +38,11 @@ export interface UseCaseStateResult {
   refresh: () => Promise<void>;
 }
 
-const POLL_MS = 2000;
+/** While a call is live in the browser, or the case had activity in the last ~2 minutes. */
+const POLL_MS = 1500;
 const IDLE_POLL_MS = 4000;
+/** Activity younger than this keeps the fast cadence (a phone call watched from a laptop). */
+const RECENT_ACTIVITY_MS = 120_000;
 /** One full read (with Xano progress) per this many polls. */
 const FULL_EVERY = 4;
 const SETTLE_MS = 900;
@@ -47,6 +51,8 @@ export function useCaseState(caseId: Id, active: boolean): UseCaseStateResult {
   const [data, setData] = useState<CaseStatePayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  /** True when the newest event is recent: a call is (probably) in progress on this case. */
+  const [recentActivity, setRecentActivity] = useState(false);
   const inFlight = useRef(false);
   const mounted = useRef(true);
 
@@ -81,6 +87,9 @@ export function useCaseState(caseId: Id, active: boolean): UseCaseStateResult {
         return;
       }
       if (record.progress) lastProgress.current = record.progress;
+      const events = Array.isArray(record.events) ? record.events : record.bundle.events ?? [];
+      const newest = events.reduce((max, event) => Math.max(max, toMillis(event.timestamp) || 0), 0);
+      setRecentActivity(newest > 0 && Date.now() - newest < RECENT_ACTIVITY_MS);
       setData({
         bundle: record.bundle,
         progress: record.progress ?? lastProgress.current,
@@ -119,7 +128,7 @@ export function useCaseState(caseId: Id, active: boolean): UseCaseStateResult {
     let id: number | null = null;
     const start = () => {
       if (id !== null) return;
-      id = window.setInterval(() => void refresh(), active ? POLL_MS : IDLE_POLL_MS);
+      id = window.setInterval(() => void refresh(), active || recentActivity ? POLL_MS : IDLE_POLL_MS);
     };
     const stop = () => {
       if (id !== null) window.clearInterval(id);
@@ -139,7 +148,7 @@ export function useCaseState(caseId: Id, active: boolean): UseCaseStateResult {
       stop();
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [active, refresh]);
+  }, [active, recentActivity, refresh]);
 
   /* One more read shortly after the call ends, so the last tool result lands. */
   const wasActive = useRef(false);

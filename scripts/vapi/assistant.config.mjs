@@ -310,15 +310,32 @@ const TOOL_MESSAGES = {
 };
 
 /** The Vapi tool list: TOOL_NAMES order, contract schemas verbatim. */
+/**
+ * How long Vapi waits for each tool before telling the model it failed.
+ * Vapi's default is 20 s. Live discovery (two searches, PDF downloads, an
+ * official-source verdict) took 6-20 s on real calls and once ran past 20 s:
+ * the server found the form, Vapi had already reported a timeout, and the
+ * agent told the caller it had trouble. These are ceilings, not targets.
+ */
+const TOOL_TIMEOUT_SECONDS = {
+  discover_program: 90,
+  find_nearby_organizations: 45,
+  get_next_question: 60,
+  finalize_document: 90,
+  send_summary: 45,
+};
+const DEFAULT_TOOL_TIMEOUT_SECONDS = 30;
+
 export function buildTools(baseUrl = serverBaseUrl()) {
-  const server = { url: `${baseUrl}/api/voice/tools` };
+  const url = `${baseUrl}/api/voice/tools`;
   return TOOL_NAMES.map((name) => {
     const schema = TOOL_SCHEMAS[name];
     const messages = TOOL_MESSAGES[name] ?? [];
+    const timeoutSeconds = TOOL_TIMEOUT_SECONDS[name] ?? DEFAULT_TOOL_TIMEOUT_SECONDS;
     return {
       type: 'function',
       function: { name, description: schema.description, parameters: schema.parameters },
-      server,
+      server: { url, timeoutSeconds },
       ...(messages.length > 0 ? { messages } : {}),
     };
   });
