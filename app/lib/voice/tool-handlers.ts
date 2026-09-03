@@ -992,7 +992,7 @@ export const voiceToolHandlers: M1VoiceToolHandlers = {
         ? `Tell the caller a text is on its way to the number ending in ${masked.slice(-4)}. Do not say the application was sent anywhere.`
         : status === 'queued'
           ? `The text is queued for the number ending in ${masked.slice(-4)}. Say it should arrive shortly; do not say the application was sent anywhere.`
-          : `I could not send the text${delivery.error ? ` (${delivery.error})` : ''}. Tell the caller plainly that no text was sent, and read them the review link: ${documentUrl}`;
+          : `I could not send the text${delivery.error ? ` (${delivery.error})` : ''}. Tell the caller plainly that no text was sent. Ask if there is another mobile number to try, and say the form will be waiting on the review screen. NEVER read the link aloud.`;
 
     return { delivery_id: delivery.id, status, to_masked: masked, note };
   },
@@ -1131,6 +1131,18 @@ export async function runVoiceTool(name: string, rawArgs: unknown): Promise<Tool
           return {
             ok: false,
             result: { error: 'I need to know where the caller is before I can look for the official form. Ask "where are you right now?" — a city or ZIP is enough.' },
+          };
+        }
+        // A hospital's financial-assistance form belongs to that hospital.
+        // Searching by location alone surfaces the state registry's generic
+        // attachment and mislabels the host as the organization — never do that.
+        if (category === 'hospital_financial_assistance' && !readString(args, 'organization')) {
+          return {
+            ok: false,
+            result: {
+              error:
+                'I need the name of the hospital that sent the bill before I can find its form. Ask "Which hospital sent you the bill?" and repeat the name back, then call discover_program with organization set to that name.',
+            },
           };
         }
         const discovered = await voiceToolHandlers.discover_program({
