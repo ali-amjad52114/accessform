@@ -8,7 +8,8 @@ import type {
   CompletenessSummary,
   Id,
 } from '../../lib/contract';
-import { FormCard, MissingCard, ResultCard, SearchCard, SituationCard } from './cards';
+import MapCard from '../map/MapCard';
+import { CardShell, FormCard, MissingCard, ResultCard, SearchCard, SituationCard } from './cards';
 import type { TimelineItem } from './timeline-model';
 
 export interface TimelineProps {
@@ -113,6 +114,29 @@ export function Timeline({
         switch (item.card) {
           case 'situation':
             return <SituationCard key={item.id} event={item.event} bundle={bundle} />;
+          case 'location': {
+            // Newest organizations_found event wins; the card that anchors the
+            // position is the first one. The list is the interface; the map is
+            // a picture of it (see components/map/README.md).
+            const latest = [...events]
+              .reverse()
+              .find((event) => event.event_type === 'organizations_found');
+            const location =
+              typeof latest?.metadata_json?.location === 'string' ? latest.metadata_json.location : null;
+            return (
+              <CardShell
+                key={item.id}
+                kind="Location"
+                title={location ? `Nearby, around ${location}` : 'Nearby organizations'}
+                sub="The numbered list AccessForm read aloud. Choosing one here does not verify its program; the search does that."
+              >
+                <MapCard
+                  data={latest?.metadata_json ?? item.event.metadata_json}
+                  selectedName={bundle?.organization?.name ?? bundle?.hospital?.name ?? null}
+                />
+              </CardShell>
+            );
+          }
           case 'search':
             return <SearchCard key={item.id} events={events} bundle={bundle} />;
           case 'form':

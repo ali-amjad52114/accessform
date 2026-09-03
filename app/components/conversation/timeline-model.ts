@@ -23,7 +23,7 @@ import type { ProgramCandidate } from '../../lib/m1/contract';
 
 export type TurnSpeaker = 'agent' | 'user';
 
-export type CardKind = 'situation' | 'search' | 'form' | 'missing' | 'result';
+export type CardKind = 'situation' | 'location' | 'search' | 'form' | 'missing' | 'result';
 
 export interface TurnItem {
   kind: 'turn';
@@ -58,10 +58,16 @@ const SYSTEM_LINE_TYPES: ReadonlySet<string> = new Set([
   'case_created',
   'call_started',
   'call_ended',
+  'organizations_not_found',
+  'approval_recorded',
+  'email_skipped',
+  'email_failed',
+  'application_emailed',
 ]);
 
 const CARD_TRIGGERS: Readonly<Record<string, CardKind>> = {
   need_resolved: 'situation',
+  organizations_found: 'location',
   search_started: 'search',
   program_discovered: 'search',
   source_not_verified: 'search',
