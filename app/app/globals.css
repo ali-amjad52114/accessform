@@ -1521,3 +1521,13 @@ kbd {
 .af-cv-receipt--warn { background: var(--cv-warn-bg); color: var(--cv-warn-ink); }
 .af-cv-confirm { display: grid; gap: 10px; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--af-border); background: var(--af-bg); font-size: 16px; }
 .af-cv-confirm__row { display: flex; gap: 10px; flex-wrap: wrap; }
+
+/* live-call watcher */
+.af-cv-livenote { margin-top: 18px; font-size: 17px; color: var(--af-muted); }
+.af-cv-livebanner {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+  margin-bottom: 14px; padding: 12px 16px; border-radius: 12px;
+  background: var(--af-accent-soft); border: 1px solid var(--af-accent-ring);
+  font-size: 17px; font-weight: 600;
+}
+.af-cv-livebanner a { text-decoration: none; }

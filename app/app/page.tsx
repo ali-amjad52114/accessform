@@ -1,6 +1,7 @@
 import { Phone } from 'lucide-react';
 import { SiteHeader } from '../components/SiteHeader';
 import { WhatHappensCard } from '../components/WhatHappensCard';
+import { LiveCallWatcher } from '../components/conversation/LiveCallWatcher';
 import { StartConversationButton } from '../components/conversation/StartConversationButton';
 
 /** The AccessForm phone number (Twilio, routed to the Vapi assistant). */
@@ -52,6 +53,8 @@ export default function StartPage() {
                 label="Start in browser"
               />
             </div>
+
+            <LiveCallWatcher mode="start" />
 
             <p className="af-hero__try" id="example-utterance-label">
               Try saying:

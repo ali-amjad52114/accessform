@@ -6,6 +6,7 @@ import type { CaseEvent, Id } from '../../lib/contract';
 import { useVoiceSession } from '../../lib/voice';
 import { CallBar } from './CallBar';
 import { DocumentsStrip } from './DocumentsStrip';
+import { LiveCallWatcher } from './LiveCallWatcher';
 import { Sidebar } from './Sidebar';
 import { Timeline } from './Timeline';
 import { buildTimeline } from './timeline-model';
@@ -145,6 +146,7 @@ export function ConversationClient({
 
         <div className="af-cv-scroll" ref={scrollRef} id="main" tabIndex={-1}>
           <div className="af-cv-column">
+            <LiveCallWatcher mode="conversation" currentCaseId={caseId} />
             {caseState.error ? (
               <div className="af-cv-error" role="alert">
                 <p>{caseState.error}</p>
