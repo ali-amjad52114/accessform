@@ -15,7 +15,7 @@ import { StartConversationButton } from './StartConversationButton';
 import { formatDay } from './timeline-model';
 
 /** Newest cases pulled from the system of record for the list. */
-const RECENT_CASES = 20;
+const RECENT_CASES = 8;
 const HISTORY_REFRESH_MS = 10_000;
 
 /**
@@ -66,8 +66,8 @@ export function Sidebar({
    */
   useEffect(() => {
     let cancelled = false;
-    const load = () => {
-      if (document.visibilityState !== 'visible') return;
+    const load = (force = false) => {
+      if (!force && document.visibilityState !== 'visible') return;
       fetchCaseSummaries(ids, { recent: RECENT_CASES })
         .then((rows) => {
           if (cancelled) return;
@@ -79,8 +79,8 @@ export function Sidebar({
           if (!cancelled) setError(fetchError.message);
         });
     };
-    load();
-    const timer = window.setInterval(load, HISTORY_REFRESH_MS);
+    load(true);
+    const timer = window.setInterval(() => load(), HISTORY_REFRESH_MS);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
