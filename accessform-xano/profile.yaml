@@ -1,0 +1,4 @@
+# Pins this project to Xano workspace 2 (accessform).
+# Workspace 1 (ALI's Workspace / rescue engine) is a separate project and is not touched.
+profile: default
+workspace: 2

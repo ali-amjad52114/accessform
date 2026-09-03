@@ -1,0 +1,26 @@
+{
+  "colors": {
+    "background": "#F7F5F0",
+    "surface": "#FFFFFF",
+    "text": "#171717",
+    "mutedText": "#66635F",
+    "accent": "#2F6B5F",
+    "accentSoft": "#E6F0EC",
+    "border": "#D8D3CB",
+    "success": "#2E7D57",
+    "warning": "#A85D22",
+    "warningBackground": "#FFF1E6"
+  },
+  "typography": {
+    "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif",
+    "bodyMinPx": 18,
+    "buttonMinPx": 18,
+    "headlineDesktopPx": 54
+  },
+  "layout": {
+    "maxWidthPx": 1440,
+    "pagePaddingDesktopPx": 72,
+    "cardRadiusPx": 24,
+    "buttonMinHeightPx": 52
+  }
+}

@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+node_modules/
+.next/
+__pycache__/
+*.pyc
+
+# Unrelated project copied in for reference; has its own git history
+xano-workspace/
+
+# Filled PDFs generated for real cases at runtime (may contain real patient data)
+app/public/generated/
+
+# Local tooling
+.claude/

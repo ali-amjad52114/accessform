@@ -1,0 +1,12 @@
+[
+  {"actor":"serpapi","message":"Searching official sources for Cedars-Sinai financial assistance"},
+  {"actor":"serpapi","message":"HCAI hospital record verified"},
+  {"actor":"serpapi","message":"Current financial-assistance application found"},
+  {"actor":"nutrient","message":"Form structure extracted"},
+  {"actor":"xano","message":"Case AF-001 created"},
+  {"actor":"xano","message":"Household answer saved"},
+  {"actor":"xano","message":"Income answer saved"},
+  {"actor":"xano","message":"Missing proof of income detected"},
+  {"actor":"nutrient","message":"Completed PDF generated"},
+  {"actor":"nutrient","message":"Accessibility processing complete"}
+]

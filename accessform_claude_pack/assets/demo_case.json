@@ -1,0 +1,22 @@
+{
+  "case_id": "AF-001",
+  "patient": {
+    "display_name": "Jane",
+    "age": 68,
+    "accessibility_context": "low vision",
+    "household_size": 1,
+    "marital_status": "single",
+    "employment_status": "retired",
+    "insurance": "Medicare",
+    "monthly_social_security_income": 2050,
+    "other_monthly_income": 0
+  },
+  "hospital": "Cedars-Sinai Medical Center",
+  "bill_amount": 7800,
+  "intent": "financial_assistance",
+  "missing_requirements": [
+    "Proof of Social Security income",
+    "Applicant signature"
+  ],
+  "final_status": "READY_FOR_REVIEW"
+}

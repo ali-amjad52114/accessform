@@ -1,0 +1,113 @@
+{
+  "formFieldValues": [
+    {
+      "name": "Patient name",
+      "type": "pspdfkit/form-field-value",
+      "v": 1,
+      "value": "Jane Doe"
+    },
+    {
+      "name": "Date of birth",
+      "type": "pspdfkit/form-field-value",
+      "v": 1,
+      "value": "01/15/1958"
+    },
+    {
+      "name": "Home address",
+      "type": "pspdfkit/form-field-value",
+      "v": 1,
+      "value": "1234 Beverly Blvd, Apt 5"
+    },
+    {
+      "name": "City",
+      "type": "pspdfkit/form-field-value",
+      "v": 1,
+      "value": "Los Angeles"
+    },
+    {
+      "name": "State",
+      "type": "pspdfkit/form-field-value",
+      "v": 1,
+      "value": "CA"
+    },
+    {
+      "name": "ZIP code",
+      "type": "pspdfkit/form-field-value",
+      "v": 1,
+      "value": "90048"
+    },
+    {
+      "name": "Home phone number",
+      "type": "pspdfkit/form-field-value",
+      "v": 1,
+      "value": "(323) 555-0142"
+    },
+    {
+      "name": "Preferred method of contact",
+      "type": "pspdfkit/form-field-value",
+      "v": 1,
+      "value": "Home phone"
+    },
+    {
+      "name": "Marital status:",
+      "type": "pspdfkit/form-field-value",
+      "v": 1,
+      "value": "Single"
+    },
+    {
+      "name": "Employment status",
+      "type": "pspdfkit/form-field-value",
+      "v": 1,
+      "value": "Retired"
+    },
+    {
+      "name": "Annual household income:",
+      "type": "pspdfkit/form-field-value",
+      "v": 1,
+      "value": "$24,600"
+    },
+    {
+      "name": "Insurer",
+      "type": "pspdfkit/form-field-value",
+      "v": 1,
+      "value": "Medicare"
+    },
+    {
+      "name": "Policyholder",
+      "type": "pspdfkit/form-field-value",
+      "v": 1,
+      "value": "Jane Doe"
+    },
+    {
+      "name": "Have you applied for MediCalMedicaid",
+      "type": "pspdfkit/form-field-value",
+      "v": 1,
+      "value": "No"
+    },
+    {
+      "name": "Have you been screened for MediCalMedicaid eligibility",
+      "type": "pspdfkit/form-field-value",
+      "v": 1,
+      "value": "No"
+    },
+    {
+      "name": "Are you eligible for any health insurance coverage?",
+      "type": "pspdfkit/form-field-value",
+      "v": 1,
+      "value": "Yes"
+    },
+    {
+      "name": "Outstanding medical debt at Cedars-Sinai or Huntington Health",
+      "type": "pspdfkit/form-field-value",
+      "v": 1,
+      "value": "$7,800"
+    },
+    {
+      "name": "Total monthly expenses",
+      "type": "pspdfkit/form-field-value",
+      "v": 1,
+      "value": "$1,850"
+    }
+  ],
+  "format": "https://pspdfkit.com/instant-json/v1"
+}
