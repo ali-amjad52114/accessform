@@ -141,7 +141,7 @@ export function ConversationClient({
           historyId={HISTORY_ID}
           historyOpen={historyOpen}
         />
-        <DocumentsStrip documents={bundle?.documents ?? []} caseId={caseId} />
+        <DocumentsStrip documents={bundle?.documents ?? []} caseId={caseId} signedUrl={data?.documentUrl ?? null} />
 
         <div className="af-cv-scroll" ref={scrollRef} id="main" tabIndex={-1}>
           <div className="af-cv-column">
@@ -171,6 +171,7 @@ export function ConversationClient({
               completeness={completeness}
               events={events}
               caseId={caseId}
+              signedUrl={data?.documentUrl ?? null}
               scrollRef={scrollRef}
               emptyText={emptyText}
             />

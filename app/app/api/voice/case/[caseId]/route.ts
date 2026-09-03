@@ -7,8 +7,21 @@
  */
 
 import { NextResponse } from 'next/server';
+import type { CaseBundle } from '../../../../../lib/contract';
 import { computeCompleteness, computeProgress, getBundle } from '../../../../../lib/voice/case-store';
 import { getXanoAdapter } from '../../../../../lib/voice/xano-bridge';
+import { buildPublicDocumentUrl } from '../../../document/_lib/public-url';
+
+/**
+ * The link that actually opens the filled document: signed and absolute when
+ * a public base URL is configured (the bare /api/document/:id route refuses
+ * unsigned requests in that mode), the same link the SMS carries. Null until
+ * a filled document exists.
+ */
+function signedDocumentUrl(caseId: string, bundle: CaseBundle): string | null {
+  const filled = bundle.documents.some((doc) => doc.type === 'filled_application');
+  return filled ? buildPublicDocumentUrl(caseId).url : null;
+}
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,7 +37,13 @@ export async function GET(
     const bundle = await xano.getCase(caseId);
     const progress = await xano.getCaseProgress(caseId).catch(() => computeProgress(bundle));
     const completeness = computeCompleteness(bundle);
-    return NextResponse.json({ bundle, progress, completeness, events: bundle.events });
+    return NextResponse.json({
+      bundle,
+      progress,
+      completeness,
+      events: bundle.events,
+      documentUrl: signedDocumentUrl(caseId, bundle),
+    });
   } catch (error) {
     const fallback = getBundle(caseId);
     if (!fallback) {
@@ -38,6 +57,7 @@ export async function GET(
       progress: computeProgress(fallback),
       completeness: computeCompleteness(fallback),
       events: fallback.events,
+      documentUrl: signedDocumentUrl(caseId, fallback),
     });
   }
 }

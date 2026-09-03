@@ -456,17 +456,19 @@ export function ResultCard({
   progress,
   events,
   caseId,
+  signedUrl = null,
 }: {
   event: CaseEvent;
   bundle: CaseBundle | null;
   progress: CaseProgress | null;
   events: CaseEvent[];
   caseId: Id;
+  signedUrl?: string | null;
 }) {
   const organization = organizationName(bundle);
   const filledDoc = bundle?.documents.find((doc) => doc.type === 'filled_application');
   const sourceDoc = bundle?.documents.find((doc) => doc.type === 'source_application');
-  const filledHref = documentHref(filledDoc, caseId);
+  const filledHref = documentHref(filledDoc, caseId, signedUrl ?? null);
   const sourceHref = documentHref(sourceDoc, caseId) ?? bundle?.program?.application_url ?? null;
   const engine = typeof event.metadata_json?.engine === 'string' ? event.metadata_json.engine : null;
   const fieldsFilled =

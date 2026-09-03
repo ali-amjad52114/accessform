@@ -21,6 +21,12 @@ export interface CaseStatePayload {
   progress: CaseProgress | null;
   completeness: CompletenessSummary | null;
   events: CaseEvent[];
+  /**
+   * Signed, absolute link to the filled document (the same link the SMS
+   * carries). The bare /api/document/:id route is token-gated in live mode,
+   * so this is the only link that opens. Null until a document exists.
+   */
+  documentUrl: string | null;
 }
 
 export interface UseCaseStateResult {
@@ -71,6 +77,7 @@ export function useCaseState(caseId: Id, active: boolean): UseCaseStateResult {
         progress: record.progress ?? null,
         completeness: record.completeness ?? null,
         events: Array.isArray(record.events) ? record.events : record.bundle.events ?? [],
+        documentUrl: typeof record.documentUrl === 'string' && record.documentUrl ? record.documentUrl : null,
       });
       setError(null);
     } catch (networkError) {

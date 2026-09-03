@@ -19,6 +19,8 @@ export interface TimelineProps {
   completeness: CompletenessSummary | null;
   events: CaseEvent[];
   caseId: Id;
+  /** Signed link to the filled document, when one exists. */
+  signedUrl?: string | null;
   /** Name for the caller's bubbles. */
   callerName?: string;
   /** Scroll container the timeline lives in (for auto-follow). */
@@ -38,6 +40,7 @@ export function Timeline({
   completeness,
   events,
   caseId,
+  signedUrl = null,
   callerName = 'You',
   scrollRef,
   emptyText,
@@ -152,6 +155,7 @@ export function Timeline({
                 progress={progress}
                 events={events}
                 caseId={caseId}
+                signedUrl={signedUrl}
               />
             );
           default:
