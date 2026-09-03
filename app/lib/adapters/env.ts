@@ -124,6 +124,29 @@ export function hasAllNutrientKeys(): boolean {
   return Boolean(keys.processor && keys.extraction && keys.accessibility);
 }
 
+/* ------------------------------------------------------------------ */
+/* Document engine                                                     */
+/* ------------------------------------------------------------------ */
+
+/** Which implementation fills and flattens the official PDF. */
+export type DocumentEngineName = 'nutrient' | 'local';
+
+/**
+ * `DOCUMENT_ENGINE` selects the fill engine. Default is `local` (pdf-lib, no
+ * paid API, no evaluation watermark). `nutrient` is honoured only when it is
+ * set explicitly AND `NUTRIENT_DWS_PROCESSOR_API` is present — the paid path
+ * can never be selected by accident. Mirrors `lib/document/engine.ts`
+ * `resolveEngine()` without importing it, so this module stays dependency-free.
+ */
+export function documentEngine(): DocumentEngineName {
+  const raw = env().DOCUMENT_ENGINE;
+  const wanted = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  if (wanted === 'nutrient' && serverSecret('NUTRIENT_DWS_PROCESSOR_API')) {
+    return 'nutrient';
+  }
+  return 'local';
+}
+
 export function vapiPrivateKey(): string | undefined {
   return serverSecret('VAPI_PRIVATE_KEY');
 }

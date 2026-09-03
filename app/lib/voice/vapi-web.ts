@@ -9,10 +9,18 @@
  *
  * Authentication is the publishable key, NEXT_PUBLIC_VAPI_PUBLIC_KEY. The
  * private key is never referenced in browser code.
+ *
+ * Tool names: the assistant calls the M1 tool set (`M1_VOICE_TOOL_NAMES`);
+ * the legacy six are still accepted so an older assistant keeps working.
+ * `VoiceToolCall.name` is the legacy closed union in the contract and is
+ * widened at this boundary by a cast (docs/M1_CONTRACT.md §4).
  */
 
 import {
   DEMO_CASE_ID,
+  M1_VOICE_TOOL_NAMES,
+  VAPI_TOOL_NAMES,
+  type Answer,
   type CaseEvent,
   type Id,
   type StartVoiceSessionOptions,
@@ -20,7 +28,6 @@ import {
   type VoiceSession,
   type VoiceState,
 } from '../contract';
-import { isVapiToolNameLoose } from './tool-names';
 import {
   VoiceEventBus,
   newSessionId,
@@ -43,6 +50,16 @@ interface VapiClient {
 type VapiConstructor = new (publicKey: string) => VapiClient;
 
 const DEFAULT_SDK_URL = 'https://esm.sh/@vapi-ai/web@2.7.0';
+
+/** Every tool name the browser should surface: the M1 set plus the legacy six. */
+const KNOWN_TOOL_NAMES: ReadonlySet<string> = new Set<string>([
+  ...M1_VOICE_TOOL_NAMES,
+  ...VAPI_TOOL_NAMES,
+]);
+
+function isKnownToolName(name: string): boolean {
+  return KNOWN_TOOL_NAMES.has(name);
+}
 
 async function loadVapiConstructor(): Promise<VapiConstructor> {
   const scope = globalThis as unknown as { Vapi?: VapiConstructor };
@@ -83,6 +100,13 @@ function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
 }
 
+interface CasePayload {
+  bundle?: { answers?: Answer[] };
+  progress?: unknown;
+  completeness?: unknown;
+  events?: CaseEvent[];
+}
+
 /* ------------------------------------------------------------------ */
 /* Adapter                                                             */
 /* ------------------------------------------------------------------ */
@@ -108,18 +132,16 @@ export function createVapiWebAdapter(options: VapiWebOptions): AccessFormVoiceAd
 
   /**
    * Progress is authoritative on the server, so after every tool result we
-   * re-read it rather than guessing from the transcript.
+   * re-read it rather than guessing from the transcript. Returns the payload
+   * so a caller can confirm a specific write landed.
    */
-  const refreshCase = async () => {
+  const refreshCase = async (): Promise<CasePayload | null> => {
+    if (caseId === DEMO_CASE_ID) return null;
     const endpoint = options.caseEndpoint ?? `/api/voice/case/${encodeURIComponent(caseId)}`;
     try {
       const response = await fetch(endpoint, { cache: 'no-store' });
-      if (!response.ok) return;
-      const payload = (await response.json()) as {
-        progress?: unknown;
-        completeness?: unknown;
-        events?: CaseEvent[];
-      };
+      if (!response.ok) return null;
+      const payload = (await response.json()) as CasePayload;
       if (payload.progress) {
         emit({ kind: 'progress', progress: payload.progress as never });
       }
@@ -129,9 +151,44 @@ export function createVapiWebAdapter(options: VapiWebOptions): AccessFormVoiceAd
       for (const event of payload.events ?? []) {
         emit({ kind: 'case_event', event });
       }
+      return payload;
     } catch {
       /* the call continues even if the read fails */
+      return null;
     }
+  };
+
+  /**
+   * The "live form state" row for a save_answer call. The value is what the
+   * assistant sent; it is marked saved only once the case read-back contains
+   * the answer, so the row never claims a write Xano did not acknowledge.
+   */
+  const trackSave = (args: Record<string, unknown>, payloadPromise: Promise<CasePayload | null>) => {
+    const fieldId = typeof args.field_id === 'string' ? args.field_id.trim() : '';
+    if (!fieldId) return;
+    const value = args.value === null || args.value === undefined ? '' : String(args.value);
+    const base = {
+      fieldId,
+      normalizedKey: fieldId,
+      label: fieldId,
+      displayValue: value,
+      savedAt: new Date().toISOString(),
+    };
+    emit({ kind: 'form_state', formState: { ...base, savedToXano: false } });
+    void payloadPromise.then((payload) => {
+      const answers = payload?.bundle?.answers ?? [];
+      const saved = answers.find((answer) => answer.field_id === fieldId);
+      if (!saved) return;
+      emit({
+        kind: 'form_state',
+        formState: {
+          ...base,
+          displayValue: String(saved.value_json ?? value),
+          savedToXano: true,
+          savedAt: saved.updated_at || base.savedAt,
+        },
+      });
+    });
   };
 
   const handleMessage = (payload: unknown) => {
@@ -159,11 +216,12 @@ export function createVapiWebAdapter(options: VapiWebOptions): AccessFormVoiceAd
       const calls = Array.isArray(message.toolCalls) ? message.toolCalls : [];
       const singular = record(message.functionCall);
       const entries = calls.length > 0 ? calls : singular.name ? [singular] : [];
+      const saves: Record<string, unknown>[] = [];
       for (const entry of entries) {
         const item = record(entry);
         const fn = record(item.function);
         const name = typeof fn.name === 'string' ? fn.name : String(item.name ?? '');
-        if (!isVapiToolNameLoose(name)) continue;
+        if (!isKnownToolName(name)) continue;
         const callId = typeof item.id === 'string' ? item.id : nextId('call');
         let args: Record<string, unknown> = {};
         const rawArgs = fn.arguments ?? item.parameters ?? item.arguments;
@@ -177,10 +235,13 @@ export function createVapiWebAdapter(options: VapiWebOptions): AccessFormVoiceAd
           args = record(rawArgs);
         }
         if (typeof args.case_id === 'string' && args.case_id) caseId = args.case_id;
-        emit({ kind: 'tool_call', call: { id: callId, name: name as VapiToolName, args } });
-        emit({ kind: 'tool_result', callId, name: name as VapiToolName, ok: true });
+        const toolName = name as VapiToolName;
+        emit({ kind: 'tool_call', call: { id: callId, name: toolName, args } });
+        emit({ kind: 'tool_result', callId, name: toolName, ok: true });
+        if (name === 'save_answer') saves.push(args);
       }
-      void refreshCase();
+      const readBack = refreshCase();
+      for (const args of saves) trackSave(args, readBack);
     }
   };
 

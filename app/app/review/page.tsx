@@ -1,10 +1,13 @@
 /**
  * /review — the last screen of the slice.
  *
- * Left ~65%: the real, filled Cedars-Sinai application, rendered by the
- * Nutrient Viewer. Right ~35%: the completeness summary and the outstanding
- * items. Nothing here says submitted, approved, eligible or signed — the
- * status wording all comes from SAFE_COPY.
+ * Left ~65%: the real, filled official form, rendered by the document viewer.
+ * Right ~35%: the completeness summary, the outstanding items, and the text
+ * delivery. Nothing here says submitted, approved, eligible or signed — the
+ * status wording is generic and names only the organization that decides.
+ *
+ * Program and organization names come from the case bundle; completeness
+ * comes from Xano (`POST /cases/{id}/validate`). No fixture outside demo mode.
  */
 
 import type { Metadata } from 'next';
@@ -18,19 +21,21 @@ import {
   SAFE_COPY,
   type CaseBundle,
   type CompletenessSummary,
+  type Delivery,
   type Requirement,
 } from '../../lib/contract';
 import { getXanoAdapter, isDemoMode } from '../../lib/adapters';
 import { describeDocument } from '../api/document/_lib/generate';
 import type { GeneratedDocument } from '../api/document/_lib/types';
 
+import { notSubmittedCopy } from '../../components/safe-copy';
 import ReviewClient from './ReviewClient';
 import styles from './review.module.css';
 
 export const metadata: Metadata = {
-  title: 'Application ready — AccessForm',
+  title: 'Form ready — AccessForm',
   description:
-    'Review the filled Cedars-Sinai financial assistance application and see what is still needed.',
+    'Review the filled official form and see what is still needed before you send it.',
 };
 
 export const dynamic = 'force-dynamic';
@@ -53,6 +58,14 @@ async function resolveCase(
   return { bundle, completeness };
 }
 
+/** Organization that owns the program: the M1 row first, the legacy hospital row second. */
+function organizationName(bundle: CaseBundle): string | null {
+  const fromOrganization = bundle.organization?.name?.trim();
+  if (fromOrganization) return fromOrganization;
+  const fromHospital = bundle.hospital?.name?.trim();
+  return fromHospital || null;
+}
+
 export default async function ReviewPage({ searchParams }: ReviewPageProps) {
   const { case: requestedCase } = await searchParams;
   const resolved = await resolveCase(requestedCase);
@@ -66,9 +79,9 @@ export default async function ReviewPage({ searchParams }: ReviewPageProps) {
         </header>
         <main className={styles.main} id="main">
           <div className={styles.titleBlock}>
-            <h1>No application to review yet</h1>
+            <h1>No form to review yet</h1>
             <p className={styles.subtitle}>
-              Start a call and AccessForm will bring you here when the application is ready.
+              Start a call and AccessForm will bring you here when the form is ready.
             </p>
             <p>
               <Link className="af-btn af-btn--primary" href="/live">
@@ -83,10 +96,13 @@ export default async function ReviewPage({ searchParams }: ReviewPageProps) {
 
   const { bundle, completeness } = resolved;
   const caseId = bundle.case.id || DEMO_CASE_ID;
-  const programName = bundle.program?.name ?? 'financial assistance application';
+  const programName = bundle.program?.name ?? 'the official form';
+  const organization = organizationName(bundle);
+  const deliveries: Delivery[] = bundle.deliveries ?? [];
   const documentUrl = `/api/document/${encodeURIComponent(caseId)}`;
+  const subtitle = organization ? `${programName} · ${organization}` : programName;
 
-  /* Cached-only so the first paint is instant and never blocked on Nutrient.
+  /* Cached-only so the first paint is instant and never blocked on the engine.
      ReviewClient re-reads the live status as soon as it mounts. */
   let initialDocument: GeneratedDocument;
   try {
@@ -128,24 +144,29 @@ export default async function ReviewPage({ searchParams }: ReviewPageProps) {
       {/* `id="main"` is the target of the skip link in app/layout.tsx. */}
       <main className={styles.main} id="main">
         <div className={styles.titleBlock}>
-          <h1>Application ready</h1>
-          <p className={styles.subtitle}>{programName}</p>
+          <h1>Form ready to review</h1>
+          <p className={styles.subtitle}>{subtitle}</p>
           <p className={styles.readyBadge}>
             <span aria-hidden="true">●</span>
-            {SAFE_COPY.readyForReview} — {SAFE_COPY.notSubmitted}
+            {SAFE_COPY.readyForReview} — {notSubmittedCopy(organization)}
           </p>
         </div>
 
         <ReviewClient
           caseId={caseId}
-          patientDisplayName={bundle.case.patient_display_name}
+          patientDisplayName={bundle.case.patient_display_name || 'you'}
           programName={programName}
+          organizationName={organization}
           program={bundle.program}
+          formKind={bundle.program?.form_kind ?? null}
           completeness={completeness}
           completedRequirements={completedRequirements}
           missingRequirements={missingRequirements}
           documentUrl={documentUrl}
           initialDocument={initialDocument}
+          deliveries={deliveries}
+          hasCallerPhone={Boolean(bundle.case.caller_phone)}
+          demoMode={isDemoMode()}
         />
       </main>
     </div>

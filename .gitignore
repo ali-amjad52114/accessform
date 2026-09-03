@@ -14,3 +14,10 @@ app/public/generated/
 
 # Local tooling
 .claude/
+
+# Runtime document cache (filled PDFs, per engine)
+app/.doccache/
+app/tsconfig.tsbuildinfo
+
+# Runtime form-schema cache (per PDF hash)
+app/.formcache/

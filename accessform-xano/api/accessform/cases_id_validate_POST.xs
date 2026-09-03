@@ -2,14 +2,15 @@
 // is still outstanding. Vapi tool `validate_case`.
 //
 // Xano owns completeness. The UI and the voice agent both read the answer from
-// here; nothing downstream re-derives it.
+// here; nothing downstream re-derives it. The scoring itself lives in the
+// case_completeness function, shared with GET /progress and
+// GET /next_question, so the three never disagree.
 //
 // Two things are deliberately NOT inferable from form fields:
-//   - proof_of_social_security_income  completes only when a supporting
-//     document row exists for the case;
+//   - proof_of_social_security_income  (hospital financial assistance only)
+//     completes only when a supporting document row exists for the case;
 //   - applicant_signature              completes only when a human has supplied
-//     the signature field. AccessForm never signs anything for a patient, so
-//     for the demo patient this stays missing by construction.
+//     a signature field. AccessForm never signs anything for a caller.
 //
 // `readyForReview` means the required form fields are all collected. It never
 // means eligible, approved, submitted or signed.
@@ -45,148 +46,15 @@ query "cases/{id}/validate" verb=POST {
       error = "No case found with that id."
     }
 
-    // ---------------------------------------------------------------
-    // Which required fields are answered?
-    // ---------------------------------------------------------------
-    db.query form_schema {
-      where = $db.form_schema.program_id == $case.program_id && $db.form_schema.required == true
-      sort = {id: "asc"}
-      return = {type: "list"}
-    } as $required_fields
+    function.run "case_completeness" {
+      input = {case_id: $case.id}
+    } as $c
 
-    db.query answers {
-      where = $db.answers.case_id == $case.id
-      sort = {id: "asc"}
-      return = {type: "list"}
-    } as $answers
-
-    // Blank strings and nulls do not count as answered.
-    var $answered {
-      value = $answers|filter:$$.value_json != null && (($$.value_json|to_text)|trim) != ""
-    }
-    var $answered_ids {
-      value = $answered|map:$$.field_id
-    }
-    // Delimited membership string. Field ids come from the AcroForm and never
-    // contain a pipe, so this stays an exact-match test.
-    var $answered_key {
-      value = "|" ~ ($answered_ids|join:"|") ~ "|"
-    }
-
-    var $complete_fields {
-      value = $required_fields|filter:($answered_key|contains:("|" ~ $$.field_id ~ "|"))
-    }
-    var $missing_fields {
-      value = $required_fields|filter:!($answered_key|contains:("|" ~ $$.field_id ~ "|"))
-    }
-
-    var $fields_total {
-      value = $required_fields|count
-    }
-    var $fields_complete {
-      value = $complete_fields|count
-    }
-
-    // ---------------------------------------------------------------
-    // Requirement checklist: five field groups, then the two evidence items.
-    // ---------------------------------------------------------------
-    var $groups {
-      value = [
-        {key: "personal_information", label: "Personal information"}
-        {key: "household_information", label: "Household information"}
-        {key: "insurance_information", label: "Insurance information"}
-        {key: "income_information", label: "Income information"}
-        {key: "monthly_expenses", label: "Monthly expenses"}
-      ]
-    }
-
-    var $requirement_specs { value = [] }
-    var $group_key { value = "" }
-    var $group_fields { value = [] }
-    var $group_done { value = [] }
-    var $group_status { value = "missing" }
-    var $spec { value = {} }
-
-    foreach ($groups) {
-      each as $group {
-        var.update $group_key { value = $group.key }
-        var.update $group_fields { value = $required_fields|filter:$$.group_key == $group_key }
-        var.update $group_done { value = $complete_fields|filter:$$.group_key == $group_key }
-        var.update $group_status { value = "missing" }
-
-        conditional {
-          if (($group_fields|count) == 0) {
-            var.update $group_status { value = "not_applicable" }
-          }
-          elseif (($group_done|count) == ($group_fields|count)) {
-            var.update $group_status { value = "complete" }
-          }
-        }
-
-        var.update $spec {
-          value = {key: $group.key, label: $group.label, type: "field", status: $group_status, evidence_url: null}
-        }
-        var.update $requirement_specs { value = $requirement_specs|push:$spec }
-      }
-    }
-
-    // Proof of income: an uploaded supporting document, nothing else.
-    db.query documents {
-      where = $db.documents.case_id == $case.id && $db.documents.type == "supporting_document"
-      sort = {id: "asc"}
-      return = {type: "list"}
-    } as $supporting_docs
-
-    var $proof_status { value = "missing" }
-    var $proof_evidence { value = null }
-    var $first_doc { value = null }
-
-    conditional {
-      if (($supporting_docs|count) > 0) {
-        var.update $first_doc { value = $supporting_docs|first }
-        var.update $proof_status { value = "complete" }
-        var.update $proof_evidence { value = ($first_doc.generated_url ?? $first_doc.source_url) }
-      }
-    }
-
-    var.update $spec {
-      value = {
-        key         : "proof_of_social_security_income"
-        label       : "Proof of Social Security income"
-        type        : "attachment"
-        status      : $proof_status
-        evidence_url: $proof_evidence
-      }
-    }
-    var.update $requirement_specs { value = $requirement_specs|push:$spec }
-
-    // Signature: only a human can complete this one.
-    db.query answers {
-      where = $db.answers.case_id == $case.id && $db.answers.field_id == "Signature of person applying for financial assistance"
-      return = {type: "single"}
-    } as $signature_answer
-
-    var $signature_status { value = "missing" }
-    conditional {
-      if ($signature_answer != null) {
-        conditional {
-          if ((($signature_answer.value_json|to_text)|trim) != "") {
-            var.update $signature_status { value = "complete" }
-          }
-        }
-      }
-    }
-
-    var.update $spec {
-      value = {
-        key         : "applicant_signature"
-        label       : "Signature of person applying for financial assistance"
-        type        : "signature"
-        status      : $signature_status
-        evidence_url: null
-      }
-    }
-    var.update $requirement_specs { value = $requirement_specs|push:$spec }
+    var $requirement_specs { value = $c.requirement_specs }
+    var $fields_total { value = $c.fields_total }
+    var $fields_complete { value = $c.fields_complete }
+    var $percent { value = $c.percent }
+    var $ready_for_review { value = $c.ready_for_review }
 
     // ---------------------------------------------------------------
     // Persist the checklist (upsert by case_id + key).
@@ -231,48 +99,12 @@ query "cases/{id}/validate" verb=POST {
       }
     }
 
-    // ---------------------------------------------------------------
-    // Score. Half the dial is the required form fields, half is the published
-    // requirement checklist - so outstanding evidence still reads as work left
-    // even once every field has been collected.
-    // ---------------------------------------------------------------
-    var $req_total {
-      value = $requirement_specs|count
-    }
-    var $req_complete {
-      value = ($requirement_specs|filter:$$.status == "complete")|count
-    }
-
-    var $fields_ratio { value = 0 }
-    conditional {
-      if ($fields_total > 0) {
-        var.update $fields_ratio { value = ($fields_complete|to_decimal) / ($fields_total|to_decimal) }
-      }
-    }
-
-    var $req_ratio { value = 0 }
-    conditional {
-      if ($req_total > 0) {
-        var.update $req_ratio { value = ($req_complete|to_decimal) / ($req_total|to_decimal) }
-      }
-    }
-
-    var $percent {
-      value = ((50 * $fields_ratio) + (50 * $req_ratio))|round:0
-    }
-
-    // "Appears complete based on the published requirements." Not eligible,
-    // not approved, not submitted, not signed.
-    var $ready_for_review {
-      value = $fields_total > 0 && $fields_complete == $fields_total
-    }
-
     var $new_status { value = "INTERVIEWING" }
     conditional {
       if ($ready_for_review) {
         var.update $new_status { value = "READY_FOR_REVIEW" }
       }
-      elseif (($answered|count) == 0) {
+      elseif ($c.answered_count == 0) {
         var.update $new_status { value = $case.status }
       }
     }
@@ -293,9 +125,9 @@ query "cases/{id}/validate" verb=POST {
       return = {type: "list"}
     } as $missing_requirements
 
-    // What should the patient be asked for next?
+    // What should the caller be asked for next?
     var $next_missing { value = null }
-    var $next_field { value = $missing_fields|first }
+    var $next_field { value = $c.next_field }
     var $next_req { value = $missing_requirements|first }
 
     conditional {
@@ -340,6 +172,7 @@ query "cases/{id}/validate" verb=POST {
     requiredFieldsTotal   : $fields_total
     missingRequirements   : $missing_requirements
     readyForReview        : $ready_for_review
+    sections              : $c.sections
     nextMissing           : $next_missing
   }
   tags = ["accessform"]

@@ -7,14 +7,20 @@
  * answer below mirrors what the real assistant does, in the same order, with
  * the same field ids, so the two paths render identically on /live.
  *
+ * The tool sequence is the M1 product spine (docs/M1_CONTRACT.md §4):
+ * create_case → resolve_need → discover_program → (get_next_question →
+ * save_answer)* → validate_case → finalize_document → send_summary.
+ * Cedars-Sinai is the first catalog entry and the regression fixture, not a
+ * product assumption: the opening line is need-agnostic.
+ *
  * Values are never written here by hand: `save` beats pull from
  * `SCRIPTED_ANSWER_BY_FIELD_ID`, which is derived from `DEMO_ANSWERS`.
  */
 
 import {
-  CEDARS_APPLICATION_PDF_URL,
   DEMO_CASE_ID,
-  type VapiToolName,
+  DEMO_HOSPITAL,
+  type M1VoiceToolName,
   type VoiceSpeaker,
   type VoiceState,
 } from '../contract';
@@ -22,54 +28,70 @@ import {
 export type ScriptBeat =
   | { kind: 'say'; speaker: VoiceSpeaker; text: string }
   | { kind: 'save'; fieldId: string }
-  | { kind: 'tool'; name: VapiToolName; args: Record<string, unknown> }
+  | { kind: 'tool'; name: M1VoiceToolName; args: Record<string, unknown> }
   | { kind: 'state'; state: VoiceState };
 
 const say = (speaker: VoiceSpeaker, text: string): ScriptBeat => ({ kind: 'say', speaker, text });
 const agent = (text: string): ScriptBeat => say('agent', text);
 const patient = (text: string): ScriptBeat => say('patient', text);
 const save = (fieldId: string): ScriptBeat => ({ kind: 'save', fieldId });
-const tool = (name: VapiToolName, args: Record<string, unknown> = {}): ScriptBeat => ({
+const tool = (name: M1VoiceToolName, args: Record<string, unknown> = {}): ScriptBeat => ({
   kind: 'tool',
   name,
   args,
 });
 
-/** The line the assistant opens with, on the phone and in the browser. */
+/** "Thinking" beat + tool call, the way the live assistant does it. */
+const call = (name: M1VoiceToolName, args: Record<string, unknown> = {}): ScriptBeat[] => [
+  { kind: 'state', state: 'thinking' },
+  tool(name, args),
+];
+
+/** What Jane says first — the situation in her own words. */
+export const SCRIPTED_SITUATION =
+  'I received a Cedars-Sinai bill for $7,800 and I can’t afford it. I’m in Los Angeles.';
+
+export const SCRIPTED_LOCATION = 'Los Angeles, CA';
+
+/** The line the assistant opens with, on the phone and in the browser. Need-agnostic. */
 export const FIRST_MESSAGE =
-  'This is AccessForm. I can help you prepare a hospital financial assistance application, by voice. Take your time — what is going on with your bill?';
+  'This is AccessForm. Tell me what is going on — a bill you cannot pay, a ride you need, help at school, a form someone sent you — and where you are. I will find the official program for it and help you fill in its form by voice. Take your time.';
 
 export const SIMULATION_SCRIPT: readonly ScriptBeat[] = [
   { kind: 'state', state: 'speaking' },
   agent(FIRST_MESSAGE),
 
   { kind: 'state', state: 'listening' },
-  patient('I received a Cedars-Sinai bill for $7,800 and I can’t afford it.'),
+  patient(SCRIPTED_SITUATION),
 
-  { kind: 'state', state: 'thinking' },
-  tool('create_case', {
-    patient_display_name: 'Jane Doe',
-    hospital_name: 'Cedars-Sinai Medical Center',
-    bill_amount: 7800,
+  ...call('create_case', {
+    situation_text: SCRIPTED_SITUATION,
+    location: SCRIPTED_LOCATION,
+  }),
+  ...call('resolve_need', {
+    case_id: DEMO_CASE_ID,
+    situation_text: SCRIPTED_SITUATION,
   }),
 
   { kind: 'state', state: 'speaking' },
   agent(
-    'I’m sorry you’re dealing with that. Cedars-Sinai has a financial assistance program, and I can help you fill in their official application right now. Let me find the current form first.',
+    'I’m sorry you’re dealing with that. That sounds like hospital financial assistance — Cedars-Sinai has a program for it, and I can help you fill in their official application right now. Let me find the current form first.',
   ),
 
-  { kind: 'state', state: 'thinking' },
-  tool('discover_program', {
+  ...call('discover_program', {
     case_id: DEMO_CASE_ID,
-    hospital: 'Cedars-Sinai Medical Center',
-    intent: 'financial_assistance',
-    location: 'California',
+    category: 'hospital_financial_assistance',
+    organization: DEMO_HOSPITAL.name,
+    location: SCRIPTED_LOCATION,
   }),
 
   { kind: 'state', state: 'speaking' },
   agent(
     'I found it — the current application, published on the state’s HCAI site. I’ll ask you the questions it asks and fill it in as we go. If you’d rather not answer something, say “not now” and I’ll note it and move on.',
   ),
+
+  ...call('get_next_question', { case_id: DEMO_CASE_ID }),
+  { kind: 'state', state: 'speaking' },
   agent('Can I start with your full name, as it appears on the bill?'),
 
   { kind: 'state', state: 'listening' },
@@ -98,6 +120,7 @@ export const SIMULATION_SCRIPT: readonly ScriptBeat[] = [
   save('Home phone number'),
   save('Preferred method of contact'),
 
+  ...call('get_next_question', { case_id: DEMO_CASE_ID }),
   { kind: 'state', state: 'speaking' },
   agent(
     'Noted — I’ll put the phone down as how they should reach you. Now two household questions. Are you single, married, widowed, or divorced?',
@@ -112,6 +135,7 @@ export const SIMULATION_SCRIPT: readonly ScriptBeat[] = [
   patient('Just me.'),
   save('as reported on your taxes'),
 
+  ...call('get_next_question', { case_id: DEMO_CASE_ID }),
   { kind: 'state', state: 'speaking' },
   agent('A household of one — that is exactly what the form asks for. Do you have health coverage right now?'),
   { kind: 'state', state: 'listening' },
@@ -129,6 +153,7 @@ export const SIMULATION_SCRIPT: readonly ScriptBeat[] = [
   save('Have you applied for MediCalMedicaid'),
   save('Have you been screened for MediCalMedicaid eligibility'),
 
+  ...call('get_next_question', { case_id: DEMO_CASE_ID }),
   { kind: 'state', state: 'speaking' },
   agent(
     'Next is the income section. I’ll say why they ask: the hospital uses your income and household size to work out how much of the bill you may not have to pay. It stays with your application.',
@@ -197,9 +222,10 @@ export const SIMULATION_SCRIPT: readonly ScriptBeat[] = [
   patient('That’s the whole bill.'),
   save('Outstanding medical debt at Cedars-Sinai or Huntington Health'),
 
+  ...call('get_next_question', { case_id: DEMO_CASE_ID }),
   { kind: 'state', state: 'speaking' },
   agent(
-    'Thank you. One more thing the form asks for: proof of your Social Security income — usually the award letter, or a bank statement showing the deposit. Do you have one you can add?',
+    'That was the last question on the form. One more thing it asks for: proof of your Social Security income — usually the award letter, or a bank statement showing the deposit. Do you have one you can add?',
   ),
   { kind: 'state', state: 'listening' },
   patient('Not right now. My niece would have to help me find it.'),
@@ -208,22 +234,30 @@ export const SIMULATION_SCRIPT: readonly ScriptBeat[] = [
   agent(
     'That is completely fine. I’ll mark it as still needed, so you know exactly what to add later. Nothing is being sent anywhere yet.',
   ),
-  { kind: 'state', state: 'thinking' },
-  tool('validate_case', { case_id: DEMO_CASE_ID }),
+  ...call('validate_case', { case_id: DEMO_CASE_ID }),
 
   { kind: 'state', state: 'speaking' },
   agent('Let me fill in the official form now.'),
-  { kind: 'state', state: 'thinking' },
-  tool('finalize_document', { case_id: DEMO_CASE_ID, source_url: CEDARS_APPLICATION_PDF_URL }),
+  ...call('finalize_document', { case_id: DEMO_CASE_ID }),
 
   { kind: 'state', state: 'speaking' },
   agent(
     'Done. Your application is filled in and ready for you to review: 26 of 26 questions answered, on the current official form, and it has been processed so a screen reader can read it.',
   ),
   agent(
-    'Two things are still needed before it can go to Cedars-Sinai: proof of your Social Security income, and your signature. I cannot sign for you, and I have not sent anything to the hospital — Cedars-Sinai decides approval, not me.',
+    'Two things are still needed before it can go to Cedars-Sinai: proof of your Social Security income, and your signature. I cannot sign for you, and I have not sent anything to the hospital — Cedars-Sinai decides, not me.',
   ),
-  agent('Both of those are written down on your review screen. Take care, Jane.'),
+  agent(
+    'I can text you a link to the filled form, with the two things still needed and what to do next. Would you like that?',
+  ),
+  { kind: 'state', state: 'listening' },
+  patient('Yes, please.'),
+  ...call('send_summary', { case_id: DEMO_CASE_ID, channel: 'sms' }),
+
+  { kind: 'state', state: 'speaking' },
+  agent(
+    'This is a demo run, so no text goes out — on a real call it would be on its way now. Everything is written down on your review screen. Take care, Jane.',
+  ),
   { kind: 'state', state: 'ended' },
 ];
 

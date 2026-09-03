@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react';
 import type { TranscriptTurn } from '../lib/contract';
 
 const SPEAKER_NAME = {
-  patient: 'Jane',
+  patient: 'Caller',
   agent: 'AccessForm',
 } as const;
 
@@ -18,6 +18,7 @@ export function Transcript({
   patientName,
 }: {
   turns: TranscriptTurn[];
+  /** Display name for the caller's turns; defaults to "Caller". */
   patientName?: string;
 }) {
   const listRef = useRef<HTMLDivElement | null>(null);

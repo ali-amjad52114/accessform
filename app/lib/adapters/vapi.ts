@@ -10,26 +10,41 @@
  * unrelated assistant. Nothing here mutates those by accident — `ensureAssistant`
  * only touches an assistant whose name matches `ACCESSFORM_ASSISTANT_NAME`.
  *
+ * The tool definitions come verbatim from `M1_VOICE_TOOL_SCHEMAS` in the
+ * contract; `scripts/vapi/assistant.config.mjs` mirrors the same schemas for
+ * the provisioning CLI (which cannot import TypeScript).
+ *
  * Mirrors `clients/vapi.py`.
  */
 
 import {
-  VAPI_TOOL_NAMES,
-  type CaseIdToolInput,
-  type CreateCaseInput,
-  type DiscoverProgramInput,
-  type FinalizeDocumentInput,
-  type SaveAnswerToolInput,
-  type VapiToolName,
+  M1_VAPI_ASSISTANT_TOOLS,
+  M1_VOICE_TOOL_NAMES,
+  M1_VOICE_TOOL_SCHEMAS,
+  type CreateCaseToolInput,
+  type DiscoverProgramToolInput,
+  type FinalizeDocumentToolInput,
+  type GetNextQuestionToolInput,
+  type JsonSchemaProperty,
+  type M1VoiceToolName,
+  type ResolveNeedToolInput,
+  type SaveAnswerM1ToolInput,
+  type SendSummaryToolInput,
+  type ValidateCaseToolInput,
 } from '../contract';
+import { ACCESSFORM_ASSISTANT_NAME } from '../voice/assistant';
 import { vapiPrivateKey } from './env';
 import { AdapterError } from './errors';
 import { requestJson } from './http';
 
 const VAPI_BASE_URL = 'https://api.vapi.ai';
 
-/** The only assistant this project is allowed to create or update. */
-export const ACCESSFORM_ASSISTANT_NAME = 'AccessForm — Cedars-Sinai financial assistance';
+/**
+ * The only assistant this project is allowed to create or update. Same
+ * constant as `lib/voice/assistant.ts` (the session route looks the assistant
+ * up by this exact name) and `ASSISTANT_NAME` in scripts/vapi/assistant.config.mjs.
+ */
+export { ACCESSFORM_ASSISTANT_NAME };
 
 /* ------------------------------------------------------------------ */
 /* Control-plane row shapes (only the fields we rely on)               */
@@ -64,11 +79,11 @@ export interface VapiCall {
 export interface VapiToolDefinition {
   type: 'function';
   function: {
-    name: VapiToolName;
+    name: M1VoiceToolName;
     description: string;
     parameters: {
       type: 'object';
-      properties: Record<string, unknown>;
+      properties: Record<string, JsonSchemaProperty>;
       required: string[];
     };
   };
@@ -79,87 +94,46 @@ export interface VapiToolDefinition {
 /* Tool definitions                                                    */
 /* ------------------------------------------------------------------ */
 
-const STRING = { type: 'string' } as const;
-const NUMBER = { type: 'number' } as const;
-
 /**
- * The six tools exposed to the voice agent, in the contract's order. Every
- * `name` is exactly what the server-side `VoiceToolHandlers` router keys on.
+ * The tools exposed to the voice agent — the eight M1 tools plus the
+ * `get_case_progress` alias — in the contract's order, with the contract's
+ * exact JSON schemas. Every `name` is exactly what the server-side
+ * `runVoiceTool` router keys on.
  */
 export function buildToolDefinitions(serverUrl: string): VapiToolDefinition[] {
-  const tool = (
-    name: VapiToolName,
-    description: string,
-    properties: Record<string, unknown>,
-    required: string[],
-  ): VapiToolDefinition => ({
-    type: 'function',
-    function: { name, description, parameters: { type: 'object', properties, required } },
-    server: { url: serverUrl },
+  return M1_VAPI_ASSISTANT_TOOLS.map((name) => {
+    const schema = M1_VOICE_TOOL_SCHEMAS[name];
+    return {
+      type: 'function' as const,
+      function: {
+        name: schema.name,
+        description: schema.description,
+        parameters: {
+          type: 'object' as const,
+          properties: { ...schema.parameters.properties },
+          required: [...schema.parameters.required],
+        },
+      },
+      server: { url: serverUrl },
+    };
   });
-
-  return [
-    tool(
-      'create_case',
-      'Create the application case once the caller has named their hospital and the amount of the bill.',
-      {
-        patient_display_name: STRING,
-        hospital_name: STRING,
-        bill_amount: NUMBER,
-      },
-      ['patient_display_name', 'hospital_name', 'bill_amount'],
-    ),
-    tool(
-      'discover_program',
-      'Find the official financial-assistance program and application form for a hospital. Only official government or hospital domains are treated as verified.',
-      { hospital: STRING, intent: STRING, location: STRING },
-      ['hospital', 'intent'],
-    ),
-    tool(
-      'save_answer',
-      'Save one confirmed answer against the case. Pass the field id exactly as returned by get_case_progress.',
-      {
-        case_id: STRING,
-        field_id: STRING,
-        value: { type: ['string', 'number', 'boolean', 'null'] },
-        source: { type: 'string', enum: ['voice', 'manual', 'document'] },
-        confirmed: { type: 'boolean' },
-      },
-      ['case_id', 'field_id', 'value'],
-    ),
-    tool(
-      'get_case_progress',
-      'Ask the system of record what to ask next and how complete the application is. Never compute this yourself.',
-      { case_id: STRING },
-      ['case_id'],
-    ),
-    tool(
-      'validate_case',
-      'Check the application against the published requirements and list anything still missing. This never means approved or eligible.',
-      { case_id: STRING },
-      ['case_id'],
-    ),
-    tool(
-      'finalize_document',
-      'Fill the official PDF, run the accessibility pass, and return the URL the review screen loads.',
-      { case_id: STRING, source_url: STRING },
-      ['case_id'],
-    ),
-  ];
 }
 
 /** Argument shapes, keyed by tool name — useful when routing raw tool calls. */
 export type VapiToolArgs = {
-  create_case: CreateCaseInput;
-  discover_program: DiscoverProgramInput;
-  save_answer: SaveAnswerToolInput;
-  get_case_progress: CaseIdToolInput;
-  validate_case: CaseIdToolInput;
-  finalize_document: FinalizeDocumentInput;
+  create_case: CreateCaseToolInput;
+  resolve_need: ResolveNeedToolInput;
+  discover_program: DiscoverProgramToolInput;
+  get_next_question: GetNextQuestionToolInput;
+  save_answer: SaveAnswerM1ToolInput;
+  validate_case: ValidateCaseToolInput;
+  finalize_document: FinalizeDocumentToolInput;
+  send_summary: SendSummaryToolInput;
+  get_case_progress: GetNextQuestionToolInput;
 };
 
-export function isVapiToolName(value: string): value is VapiToolName {
-  return (VAPI_TOOL_NAMES as readonly string[]).includes(value);
+export function isVapiToolName(value: string): value is M1VoiceToolName {
+  return (M1_VOICE_TOOL_NAMES as readonly string[]).includes(value);
 }
 
 /* ------------------------------------------------------------------ */
@@ -248,8 +222,8 @@ export class VapiControlPlane {
 
   /**
    * Create the AccessForm assistant, or update the existing one in place.
-   * `serverUrl` is the public HTTPS endpoint that implements
-   * `VoiceToolHandlers`.
+   * `serverUrl` is the public HTTPS endpoint that implements the voice tools
+   * (`/api/voice/tools`).
    */
   async ensureAssistant(
     serverUrl: string,
@@ -266,8 +240,7 @@ export class VapiControlPlane {
 
     const payload: Record<string, unknown> = {
       name: ACCESSFORM_ASSISTANT_NAME,
-      firstMessage:
-        'Hello, this is AccessForm. I can help you prepare a financial assistance application for your hospital bill. Which hospital is the bill from?',
+      firstMessage: ASSISTANT_FIRST_MESSAGE,
       model: {
         provider: 'openai',
         model: 'gpt-4o',
@@ -283,41 +256,53 @@ export class VapiControlPlane {
   }
 }
 
+/** Need-agnostic opening line. Same as FIRST_MESSAGE in scripts/vapi/assistant.config.mjs. */
+export const ASSISTANT_FIRST_MESSAGE =
+  "This is AccessForm. I help people find the official form for their situation and fill it in by voice. Take your time — what's going on?";
+
 /**
- * Voice-agent policy, straight from API_INTEGRATIONS.md §4 and the product
- * rules. The disclaimers are not optional — AccessForm must never claim
- * eligibility, approval, submission, or a signature.
+ * Voice-agent policy, from docs/PRODUCT_PLAN.md and docs/M1_CONTRACT.md §4.
+ * The disclaimers are not optional — AccessForm must never claim eligibility,
+ * approval, submission, or a signature. The full conversational prompt lives
+ * in scripts/vapi/assistant.config.mjs; this is the compact policy used when
+ * the adapter provisions the assistant itself.
  */
 export const ASSISTANT_SYSTEM_PROMPT = [
-  'You are AccessForm, a patient advocate helping someone prepare a hospital',
-  'financial-assistance application by voice. The caller may be blind or have',
-  'low vision, so everything must work by ear alone.',
+  'You are AccessForm, a voice assistant for people with disabilities. The',
+  'caller describes what they need in their own words; you find the official',
+  'program and form for that need and place, interview them from that form,',
+  'fill the real document, and text them the result. You never submit anything.',
   '',
   'How to talk:',
   '- Ask exactly one clear question at a time, then wait.',
   '- Never read PDF field labels mechanically. Use plain language.',
-  '- Explain why you need sensitive information before asking for it.',
+  '- Explain why the form asks for sensitive information before asking for it.',
   '- "I don\'t know" and "not now" are always acceptable answers. Move on and',
   '  record that the item is still outstanding.',
   '- Read numbers back for confirmation before saving them.',
   '',
-  'How to work:',
-  '- Call create_case once you know the hospital and the amount of the bill.',
-  '- Call discover_program to find the official form. Only official government',
-  '  or hospital sources count as verified.',
-  '- Call get_case_progress to decide what to ask next. Never guess at progress',
-  '  or completeness yourself — the system of record is authoritative.',
-  '- Call save_answer after the caller confirms each answer.',
-  '- Call validate_case before wrapping up, then finalize_document.',
+  'How to work, in order:',
+  '- Listen first. Call create_case with what the caller said, then resolve_need.',
+  '- If resolve_need is unsure, ask its clarifying question and call it again.',
+  '- If you do not know where the caller is, ask "where are you right now?" —',
+  '  a city or ZIP is enough — then call discover_program.',
+  '- If discover_program returns found=false, say plainly that you could not',
+  '  verify an official form for that organization or place, and stop. Never',
+  '  substitute another organization\'s form.',
+  '- Call get_next_question before every question and ask its prompt in plain',
+  '  words. Call save_answer after each answer. Never guess at progress.',
+  '- Call validate_case, then finalize_document, then send_summary to the',
+  '  caller\'s phone (ask which number to text if you do not know it).',
   '',
   'What you must never say:',
   '- Never say the caller is eligible, qualifies, is approved, or will be',
-  '  approved. The hospital decides that.',
-  '- Never say the application has been submitted or sent. It has not.',
+  '  approved. The organization decides that.',
+  '- Never say the application has been submitted, sent, or filed. It has not.',
   '- Never say the form is signed. You cannot sign anything.',
   '',
-  'Before ending the call, state plainly what is still outstanding, and that the',
-  'application is ready for the caller to review but has not been submitted.',
+  'Before ending the call, state plainly what is still missing, that a text',
+  'with the review link is on its way only if send_summary said so, and that',
+  'nothing has been sent to the organization.',
 ].join('\n');
 
 /**

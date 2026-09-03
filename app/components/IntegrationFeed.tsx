@@ -2,7 +2,7 @@ import type { CaseEvent, EventActor } from '../lib/contract';
 
 /** Display names for the sponsor/system actors shown in the feed. */
 const ACTOR_LABEL: Readonly<Record<EventActor, string>> = {
-  user: 'Jane',
+  user: 'Caller',
   voice_agent: 'AccessForm',
   serpapi: 'SerpApi',
   xano: 'Xano',
@@ -57,32 +57,40 @@ function collapse(events: CaseEvent[]): FeedRow[] {
 
 /**
  * Sponsor visibility without turning the product into a dev console: one
- * short human sentence per integration step, newest last.
+ * short human sentence per integration step, newest last. The rows are
+ * whatever the case record says — nothing here assumes a particular form.
  */
 export function IntegrationFeed({
   events,
   simulated,
+  callerName,
 }: {
   events: CaseEvent[];
   /** True when the run is replaying fixtures instead of calling live APIs. */
   simulated: boolean;
+  /** Display name for the `user` actor; defaults to "Caller". */
+  callerName?: string;
 }) {
   if (events.length === 0) {
     return (
       <p className="af-transcript__empty">
-        Integration activity appears here as the call runs.
+        Activity appears here as the call runs: the need being understood, the
+        official form being found and verified, each answer being saved, and
+        the form being filled.
       </p>
     );
   }
 
   const rows = collapse(events);
+  const actorLabel = (actor: EventActor) =>
+    actor === 'user' && callerName ? callerName : ACTOR_LABEL[actor];
 
   return (
     <>
       <ol className="af-feed">
         {rows.map((row) => (
           <li className="af-feed__row" key={row.id}>
-            <span className="af-feed__actor">{ACTOR_LABEL[row.actor]}</span>
+            <span className="af-feed__actor">{actorLabel(row.actor)}</span>
             <span className="af-feed__message">
               {row.message}
               {row.count > 1 ? (
@@ -98,7 +106,7 @@ export function IntegrationFeed({
       </ol>
       <p className="af-feed__caption">
         {simulated
-          ? 'Demo mode: this run replays the verified Cedars-Sinai discovery and document steps. '
+          ? 'Demo mode: this run replays a recorded call against a verified catalog form; no service is called and nothing is sent. '
           : 'Each row above is one call to a named service. '}
         Source URLs and retrieval times are kept with the case record.
       </p>

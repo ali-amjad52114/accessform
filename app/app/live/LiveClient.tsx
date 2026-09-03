@@ -1,12 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useMemo } from 'react';
+import { useCallback } from 'react';
 import { ArrowRight, Pause, PhoneOff, Play, RotateCcw } from 'lucide-react';
 import {
   DEMO_CASE_ID,
-  DEMO_HOSPITAL,
-  DEMO_PROGRAM,
   PROGRESS_STEP_IDS,
   PROGRESS_STEP_LABELS,
   type CaseProgress,
@@ -25,7 +23,11 @@ import {
 } from '../../components/LiveFormState';
 import { IntegrationFeed } from '../../components/IntegrationFeed';
 
-/** Shown for the moment between mount and the first progress event. */
+/**
+ * Shown for the moment between mount and the first progress event. These are
+ * the legacy eight steps; once Xano reports the form's own sections the
+ * progress card renders those instead (see ApplicationProgress).
+ */
 const EMPTY_PROGRESS: CaseProgress = {
   caseId: DEMO_CASE_ID,
   status: 'CREATED',
@@ -41,17 +43,27 @@ const EMPTY_PROGRESS: CaseProgress = {
   nextPrompt: null,
 };
 
+const FORM_KIND_WORD = {
+  fillable_pdf: 'fillable PDF form',
+  flat_pdf: 'PDF form (not fillable yet)',
+  online_form: 'online form',
+  in_person: 'in-person application',
+} as const;
+
 export function LiveClient() {
   const voice = useVoiceSession({ caseId: DEMO_CASE_ID, autoStart: true });
 
   const {
     state,
+    activeCaseId,
     progress,
     progressAnnouncement,
     transcript,
     events,
     missingRequirements,
     lastSavedAnswer,
+    lastSavedSection,
+    program,
     completeness,
     simulated,
     error,
@@ -60,20 +72,20 @@ export function LiveClient() {
     end,
     reset,
     start,
-    toolCalls,
   } = voice;
 
-  /* In a live call the assistant opens the case itself; every later tool call
-     carries that id, so the most recent one is the case to review. */
-  const liveCaseId = useMemo(() => {
-    for (let i = toolCalls.length - 1; i >= 0; i -= 1) {
-      const id = toolCalls[i].args.case_id;
-      if (typeof id === 'string' && id) return id;
-    }
-    return null;
-  }, [toolCalls]);
-  const reviewHref = liveCaseId ? `/review?case=${encodeURIComponent(liveCaseId)}` : '/review';
-  const patientLabel = simulated ? "Jane's application" : 'Your application';
+  const reviewHref = activeCaseId
+    ? `/review?case=${encodeURIComponent(activeCaseId)}`
+    : '/review';
+  const callerName = simulated ? 'Jane' : 'You';
+
+  /* "Your call" until discover_program has matched a verified program. */
+  const title = program ? program.name : 'Your call';
+  const subtitle = program
+    ? [program.organization, program.formKind ? FORM_KIND_WORD[program.formKind] : null]
+        .filter(Boolean)
+        .join(' · ')
+    : 'Describe what is going on and where you are. AccessForm finds the official form from there.';
 
   const togglePause = useCallback(() => {
     if (state === 'ended') return;
@@ -98,6 +110,7 @@ export function LiveClient() {
         label: lastSavedAnswer.label,
         display: lastSavedAnswer.displayValue,
         saved: lastSavedAnswer.savedToXano,
+        section: lastSavedSection,
       }
     : null;
 
@@ -107,12 +120,9 @@ export function LiveClient() {
 
       <main className="af-container" id="main">
         <div className="af-screenhead">
-          <h1 className="af-screenhead__title">{patientLabel}</h1>
-          <p className="af-screenhead__sub">
-            Cedars-Sinai · Financial Assistance
-            <span className="af-sr-only">
-              {` — ${DEMO_HOSPITAL.name}, ${DEMO_PROGRAM.name}`}
-            </span>
+          <h1 className="af-screenhead__title">{title}</h1>
+          <p className="af-screenhead__sub" aria-live="polite">
+            {subtitle}
           </p>
         </div>
 
@@ -127,7 +137,7 @@ export function LiveClient() {
 
           <Card title="Conversation" titleId="conversation-card-title">
             <VoiceOrb state={state} />
-            <Transcript turns={transcript} patientName={simulated ? 'Jane' : 'You'} />
+            <Transcript turns={transcript} patientName={callerName} />
             <LiveFormState field={field} />
 
             {error ? (
@@ -144,7 +154,7 @@ export function LiveClient() {
                   onClick={replay}
                 >
                   <RotateCcw size={20} strokeWidth={2.5} aria-hidden="true" />
-                  Replay the call
+                  {simulated ? 'Replay the call' : 'Start a new call'}
                 </button>
               ) : (
                 <>
@@ -179,7 +189,7 @@ export function LiveClient() {
                 }
                 href={reviewHref}
               >
-                Review the application
+                Review the form
                 <ArrowRight size={20} strokeWidth={2.5} aria-hidden="true" />
               </Link>
 
@@ -192,7 +202,11 @@ export function LiveClient() {
 
         <div className="af-livefoot">
           <Card title="Activity" titleId="activity-card-title">
-            <IntegrationFeed events={events} simulated={simulated} />
+            <IntegrationFeed
+              events={events}
+              simulated={simulated}
+              callerName={simulated ? 'Jane' : undefined}
+            />
           </Card>
         </div>
       </main>

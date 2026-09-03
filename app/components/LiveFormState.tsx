@@ -9,12 +9,15 @@ export interface LiveFieldSnapshot {
   display: string;
   /** True once Xano has acknowledged the write. */
   saved: boolean;
+  /** The form section the field belongs to, when known ("Household"). */
+  section?: string | null;
 }
 
 /**
  * Bottom of the right card on /live: the last structured answer written to
- * Xano. Announced politely so a screen-reader user hears each save, and the
- * saved/pending distinction is a word plus an icon, never a colour.
+ * Xano, with the section of the form it belongs to. Announced politely so a
+ * screen-reader user hears each save, and the saved/pending distinction is a
+ * word plus an icon, never a colour.
  */
 export function LiveFormState({ field }: { field: LiveFieldSnapshot | null }) {
   return (
@@ -35,6 +38,12 @@ export function LiveFormState({ field }: { field: LiveFieldSnapshot | null }) {
         ) : (
           <>
             <span className="af-formstate__key">
+              {field.section ? (
+                <span className="af-formstate__section">
+                  <span className="af-sr-only">Section: </span>
+                  {field.section}
+                </span>
+              ) : null}
               {field.key}
               <span className="af-sr-only">{` (${field.label})`}</span>
             </span>

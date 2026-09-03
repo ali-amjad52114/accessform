@@ -38,6 +38,7 @@ import { fixtureSerpAdapter } from '../fixtures/serp';
 import { fixtureVoiceAdapter } from '../fixtures/voice';
 import { fixtureXanoAdapter } from '../fixtures/xano';
 import {
+  documentEngine,
   hasAllNutrientKeys,
   isBrowser,
   isDemoMode,
@@ -80,7 +81,9 @@ export function resolveModes(): AdapterModes {
     // Live only ever means "may refresh on request"; the default path is cached.
     serp: serpApiKey() ? 'live' : 'fixture',
     xano: xanoCredentials() ? 'live' : 'fixture',
-    nutrient: hasAllNutrientKeys() ? 'live' : 'fixture',
+    // With the local document engine the fill runs on pdf-lib, so missing
+    // Nutrient keys must not force the fixture document.
+    nutrient: hasAllNutrientKeys() || documentEngine() === 'local' ? 'live' : 'fixture',
     voice: vapiPrivateKey() ? 'live' : 'fixture',
   };
 }

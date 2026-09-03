@@ -1,0 +1,95 @@
+[
+  {
+    "need": "hospital_financial_assistance",
+    "organization": "Cedars-Sinai Medical Center",
+    "region": "Los Angeles, CA",
+    "kind": "hospital",
+    "program": "Financial Assistance Application",
+    "application_url": "https://api.hdc.hcai.ca.gov/Public/Extract/Attachment?id=1b7ee017-9db0-4a44-b3dc-a39c5986f24e",
+    "policy_url": "https://hcai.ca.gov/affordability/hospital-billing-policies/cedars-sinai-medical-center/",
+    "source_domain": "api.hdc.hcai.ca.gov",
+    "local_file": null,
+    "form_kind": "fillable_pdf",
+    "pages": 3,
+    "field_count": 101,
+    "sha256": "63954187b80911aa",
+    "field_types": {
+      "/Tx": 90,
+      "/Btn": 9,
+      "/Sig": 0,
+      "/Ch": 0
+    },
+    "verified_at": "2026-09-03",
+    "verified": true
+  },
+  {
+    "need": "paratransit",
+    "organization": "Access Services",
+    "region": "Los Angeles County, CA",
+    "kind": "transit_agency",
+    "program": "ADA Paratransit Eligibility Application (English)",
+    "application_url": "https://accessla.org/sites/default/files/Eligibility/Access_Application_ENG_fill_03012026.pdf",
+    "policy_url": "https://accessla.org/riding_access/gaining_eligibility.html",
+    "source_domain": "accessla.org",
+    "local_file": "spike/la_access_application_en.pdf",
+    "notes": "Spanish twin: Access_Application_SPAN_fill_03012026.pdf (140 fields). Eligibility is finalized by an in-person transit evaluation; the application is step one.",
+    "form_kind": "fillable_pdf",
+    "pages": 10,
+    "field_count": 146,
+    "sha256": "85ed7b740f964722",
+    "field_types": {
+      "/Tx": 112,
+      "/Btn": 34,
+      "/Sig": 0,
+      "/Ch": 0
+    },
+    "verified_at": "2026-09-03",
+    "verified": true
+  },
+  {
+    "need": "paratransit",
+    "organization": "SFMTA / SF Paratransit",
+    "region": "San Francisco, CA",
+    "kind": "transit_agency",
+    "program": "ADA Paratransit Application (rev 6-2020, fillable)",
+    "application_url": "https://www.sfmta.com/sites/default/files/reports-and-documents/2020/07/ada_application_form_rev_6-2020_-_form_fillable.pdf",
+    "policy_url": "https://www.sfmta.com/reports/applications-ada-paratransit-service",
+    "source_domain": "sfmta.com",
+    "local_file": "spike/sf_paratransit_application.pdf",
+    "form_kind": "fillable_pdf",
+    "pages": 10,
+    "field_count": 168,
+    "sha256": "a10c38c975ea3d40",
+    "field_types": {
+      "/Tx": 85,
+      "/Btn": 80,
+      "/Sig": 3,
+      "/Ch": 0
+    },
+    "verified_at": "2026-09-03",
+    "verified": true
+  },
+  {
+    "need": "disability_accommodation",
+    "organization": "Napa Valley College",
+    "region": "Napa, CA",
+    "kind": "college",
+    "program": "DSPS Student Application",
+    "application_url": "(from napavalley.edu DSPS page)",
+    "policy_url": "https://www.napavalley.edu/student-services-and-resources/disability-support-programs-and-services",
+    "source_domain": "napavalley.edu",
+    "local_file": "spike/college_dsps_napavalley.pdf",
+    "form_kind": "fillable_pdf",
+    "pages": 2,
+    "field_count": 32,
+    "sha256": "4b73674bde2719ba",
+    "field_types": {
+      "/Tx": 21,
+      "/Btn": 10,
+      "/Sig": 1,
+      "/Ch": 0
+    },
+    "verified_at": "2026-09-03",
+    "verified": true
+  }
+]

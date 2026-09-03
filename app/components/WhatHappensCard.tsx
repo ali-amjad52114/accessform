@@ -1,12 +1,12 @@
 import { Card } from './Card';
 
-/** The five things AccessForm does, in order. Verbatim from mockups/01_start.png. */
+/** The five things AccessForm does, in order — for any need, any official form. */
 export const WHAT_HAPPENS_STEPS = [
-  'Find the official program',
-  'Ask only relevant questions',
-  'Fill the real hospital PDF',
-  'Catch what is still missing',
-  'Return an accessible form',
+  'Tell us what’s going on',
+  'We find the official program and form',
+  'Answer a few questions by voice',
+  'We fill the real form',
+  'You get it by text, with what’s still missing',
 ] as const;
 
 export function WhatHappensCard() {
@@ -26,7 +26,8 @@ export function WhatHappensCard() {
         ))}
       </ol>
       <p className="af-note">
-        Designed for voice, keyboard, screen readers, and high contrast.
+        Nothing is submitted or signed for you. Designed for voice, keyboard,
+        screen readers, and high contrast.
       </p>
     </Card>
   );

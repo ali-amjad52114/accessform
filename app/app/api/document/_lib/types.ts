@@ -5,6 +5,7 @@
  */
 
 import type { AccessibilityStatus, Id } from '../../../../lib/contract';
+import type { DocumentEngine } from '../../../../lib/document/engine';
 
 /** Where the bytes we are serving actually came from. */
 export type DocumentOrigin = 'live' | 'cache' | 'fixture';
@@ -20,6 +21,11 @@ export interface GeneratedDocument {
   fieldsFilled: number;
   byteLength: number;
   origin: DocumentOrigin;
+  /**
+   * Which engine produced the bytes: `local` (pdf-lib, no watermark) or
+   * `nutrient` (paid /build). Absent only for a bundled fixture.
+   */
+  engine?: DocumentEngine;
   /** Non-fatal problem worth surfacing in the UI — never a claim of success. */
   note: string | null;
 }

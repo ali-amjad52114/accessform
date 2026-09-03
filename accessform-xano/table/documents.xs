@@ -24,7 +24,7 @@ table documents {
     // Those are the values to write. The original four are kept so rows
     // written before the vocabularies were reconciled still validate.
     enum accessibility_status?="pending" {
-      values = ["pending", "processing", "processed", "failed", "not_applicable", "not_started", "complete"]
+      values = ["pending", "processing", "processed", "preserved", "failed", "not_applicable", "not_started", "complete"]
     }
 
     // Hash of the source bytes, so we can prove which version was filled.

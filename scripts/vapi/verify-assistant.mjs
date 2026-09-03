@@ -1,25 +1,19 @@
 /**
  * Verification: list the account's assistants over the API and confirm the
- * AccessForm one exists with all six tools attached.
+ * AccessForm one exists with every M1 tool attached.
  *
  *   node scripts/vapi/verify-assistant.mjs
  *
- * Exits non-zero if the assistant is missing, a tool is missing, or a tool has
- * no server URL. Also prints the phone numbers so it is obvious that neither
- * has been repointed.
+ * Exits non-zero if the assistant is missing, a tool is missing, a tool has
+ * no server URL, or discover_program's category enum does not match the
+ * config. Also prints the phone numbers so it is obvious that neither has
+ * been repointed.
  */
 
-import { ASSISTANT_NAME, FIELD_KEYS } from './assistant.config.mjs';
+import { ASSISTANT_NAME, NEED_CATEGORIES, TOOL_NAMES } from './assistant.config.mjs';
 import { vapi } from './vapi-client.mjs';
 
-const EXPECTED_TOOLS = [
-  'create_case',
-  'discover_program',
-  'save_answer',
-  'get_case_progress',
-  'validate_case',
-  'finalize_document',
-];
+const EXPECTED_TOOLS = TOOL_NAMES;
 
 async function main() {
   const assistants = await vapi.assistants();
@@ -48,17 +42,18 @@ async function main() {
   console.log(`  transcriber  : ${full.transcriber?.provider}/${full.transcriber?.model}`);
   console.log(`  server url   : ${full.server?.url ?? '(none)'}`);
   console.log(`  serverMsgs   : ${(full.serverMessages ?? []).join(', ')}`);
+  console.log(`  firstMessage : ${JSON.stringify(full.firstMessage ?? '')}`);
   console.log(`  systemPrompt : ${String(full.model?.messages?.[0]?.content ?? '').length} chars`);
   console.log('  tools        :');
   for (const tool of tools) {
     const parameters = tool.function?.parameters ?? {};
     const properties = Object.keys(parameters.properties ?? {});
     const required = parameters.required ?? [];
-    const enumSize = parameters.properties?.field_id?.enum?.length;
+    const enumSize = parameters.properties?.category?.enum?.length;
     console.log(
       `    - ${tool.function?.name}  url=${tool.server?.url ?? '(none)'}  ` +
         `params=[${properties.join(', ')}]  required=[${required.join(', ')}]` +
-        (enumSize ? `  field_id enum=${enumSize}` : ''),
+        (enumSize ? `  category enum=${enumSize}` : ''),
     );
   }
 
@@ -66,12 +61,17 @@ async function main() {
   const problems = [];
   if (missing.length) problems.push(`missing tools: ${missing.join(', ')}`);
   if (withoutServer.length) problems.push(`tools without a server URL: ${withoutServer.join(', ')}`);
+  const categoryEnum = tools.find((tool) => tool.function?.name === 'discover_program')?.function
+    ?.parameters?.properties?.category?.enum;
+  if (!categoryEnum || JSON.stringify(categoryEnum) !== JSON.stringify(NEED_CATEGORIES)) {
+    problems.push(
+      `discover_program category enum is [${(categoryEnum ?? []).join(', ')}], expected [${NEED_CATEGORIES.join(', ')}]`,
+    );
+  }
   const fieldEnum = tools.find((tool) => tool.function?.name === 'save_answer')?.function?.parameters
     ?.properties?.field_id?.enum;
-  if (!fieldEnum || fieldEnum.length !== FIELD_KEYS.length) {
-    problems.push(
-      `save_answer field_id enum has ${fieldEnum ? fieldEnum.length : 0} entries, expected ${FIELD_KEYS.length}`,
-    );
+  if (fieldEnum) {
+    problems.push('save_answer field_id still has an enum; M1 validates field_id server-side against form_schema');
   }
 
   const numbers = await vapi.phoneNumbers();

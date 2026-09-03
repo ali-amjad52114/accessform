@@ -15,8 +15,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   ASSISTANT_NAME,
-  FIELD_KEYS,
   FIRST_MESSAGE,
+  NEED_CATEGORIES,
+  TOOL_NAMES,
   buildAssistantPayload,
 } from './assistant.config.mjs';
 import { APP_DIR, env, isLocalUrl, serverBaseUrl } from './env.mjs';
@@ -24,41 +25,71 @@ import { vapi } from './vapi-client.mjs';
 
 const dryRun = process.argv.includes('--dry-run');
 
-/** The tool enum must match the interview plan the server resolves against. */
-function checkFieldKeysMatchFormPlan() {
-  const planPath = path.join(APP_DIR, 'lib', 'voice', 'form-plan.ts');
-  if (!fs.existsSync(planPath)) {
-    console.warn(`! Could not find ${planPath}; skipping the field-key check.`);
-    return;
-  }
-  const source = fs.readFileSync(planPath, 'utf8');
-  const keys = [...source.matchAll(/normalizedKey:\s*'([^']+)'/g)].map((match) => match[1]);
-  const missing = keys.filter((key) => !FIELD_KEYS.includes(key));
-  const extra = FIELD_KEYS.filter((key) => !keys.includes(key));
-  if (missing.length || extra.length) {
-    throw new Error(
-      `Tool field_id enum is out of sync with lib/voice/form-plan.ts.\n` +
-        `  missing from assistant.config.mjs: ${missing.join(', ') || '(none)'}\n` +
-        `  not in the form plan: ${extra.join(', ') || '(none)'}`,
-    );
-  }
-  console.log(`✓ field_id enum matches lib/voice/form-plan.ts (${keys.length} fields)`);
+/** Read a `const NAME = [ 'a', 'b', ... ]` tuple out of the TypeScript contract. */
+function readTupleFromContract(source, constName) {
+  const match = source.match(new RegExp(`export const ${constName} = \\[([\\s\\S]*?)\\]`));
+  if (!match) return null;
+  return [...match[1].matchAll(/'([^']+)'/g)].map((entry) => entry[1]);
 }
 
-/** The first message the caller hears must match the simulated script. */
+/**
+ * The tool names and the category enum must match app/lib/m1/contract.ts
+ * (M1_VOICE_TOOL_NAMES, NEED_CATEGORIES) — the server router keys on them and
+ * discover_program validates `category` against the same list.
+ */
+function checkConfigMatchesContract() {
+  const contractPath = path.join(APP_DIR, 'lib', 'm1', 'contract.ts');
+  if (!fs.existsSync(contractPath)) {
+    console.warn(`! Could not find ${contractPath}; skipping the contract check.`);
+    return;
+  }
+  const source = fs.readFileSync(contractPath, 'utf8');
+  const problems = [];
+
+  const toolNames = readTupleFromContract(source, 'M1_VOICE_TOOL_NAMES');
+  if (!toolNames) {
+    problems.push('could not read M1_VOICE_TOOL_NAMES from the contract');
+  } else if (JSON.stringify(toolNames) !== JSON.stringify(TOOL_NAMES)) {
+    problems.push(
+      `TOOL_NAMES differs from M1_VOICE_TOOL_NAMES\n    contract: ${toolNames.join(', ')}\n    config  : ${TOOL_NAMES.join(', ')}`,
+    );
+  }
+
+  const categories = readTupleFromContract(source, 'NEED_CATEGORIES');
+  if (!categories) {
+    problems.push('could not read NEED_CATEGORIES from the contract');
+  } else if (JSON.stringify(categories) !== JSON.stringify(NEED_CATEGORIES)) {
+    problems.push(
+      `NEED_CATEGORIES differs from the contract\n    contract: ${categories.join(', ')}\n    config  : ${NEED_CATEGORIES.join(', ')}`,
+    );
+  }
+
+  const assistantPath = path.join(APP_DIR, 'lib', 'voice', 'assistant.ts');
+  if (fs.existsSync(assistantPath) && !fs.readFileSync(assistantPath, 'utf8').includes(`'${ASSISTANT_NAME}'`)) {
+    problems.push(`ASSISTANT_NAME "${ASSISTANT_NAME}" is not the name in app/lib/voice/assistant.ts`);
+  }
+
+  if (problems.length) {
+    throw new Error(`assistant.config.mjs is out of sync with the app:\n  ${problems.join('\n  ')}`);
+  }
+  console.log(`✓ ${TOOL_NAMES.length} tool names and ${NEED_CATEGORIES.length} categories match app/lib/m1/contract.ts`);
+  console.log(`✓ assistant name matches app/lib/voice/assistant.ts`);
+}
+
+/** The first message the caller hears should match the simulated script (soft check). */
 function checkFirstMessageMatchesScript() {
   const scriptPath = path.join(APP_DIR, 'lib', 'voice', 'script.ts');
   if (!fs.existsSync(scriptPath)) return;
   const source = fs.readFileSync(scriptPath, 'utf8');
   if (!source.includes(FIRST_MESSAGE)) {
-    console.warn('! FIRST_MESSAGE differs from app/lib/voice/script.ts — the demo will drift.');
+    console.warn('! FIRST_MESSAGE differs from app/lib/voice/script.ts — the demo simulation will open differently.');
   } else {
     console.log('✓ first message matches the simulated script');
   }
 }
 
 async function main() {
-  checkFieldKeysMatchFormPlan();
+  checkConfigMatchesContract();
   checkFirstMessageMatchesScript();
 
   const baseUrl = serverBaseUrl();

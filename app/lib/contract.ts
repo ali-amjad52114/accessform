@@ -20,6 +20,26 @@
  */
 
 /* ------------------------------------------------------------------ */
+/* M1 contract (docs/M1_CONTRACT.md)                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Everything M1 adds lives in ./m1/contract.ts and is re-exported here so
+ * `import { ... } from '@/lib/contract'` (or '../contract') keeps being the
+ * single import path. Type-only imports below break the cycle at compile time.
+ */
+export * from './m1/contract';
+
+import type {
+  CaseDeliveryStatus,
+  Delivery,
+  FormKind,
+  InterviewSection,
+  NeedCategory,
+  Organization,
+} from './m1/contract';
+
+/* ------------------------------------------------------------------ */
 /* Primitives                                                          */
 /* ------------------------------------------------------------------ */
 
@@ -95,14 +115,22 @@ export const DOCUMENT_TYPES = [
 ] as const satisfies readonly DocumentType[];
 
 /**
- * Lifecycle of a document through `POST /accessibility/autotag`.
- * `processed` is the only state that may be described in UI copy as
- * "accessibility processed".
+ * Lifecycle of a document through the accessibility step.
+ *
+ * - `processed`  — a Nutrient `POST /accessibility/autotag` pass ran and
+ *                  returned a tagged document. This is the ONLY state that may
+ *                  be described in UI copy as "accessibility processed".
+ * - `preserved`  — no accessibility pass ran; the official source document's
+ *                  own tagging (StructTreeRoot / MarkInfo / Lang) was kept
+ *                  intact through a local fill. Copy must say "preserved",
+ *                  never "processed".
+ * - `failed`     — a pass was attempted and did not complete (e.g. HTTP 402).
  */
 export type AccessibilityStatus =
   | 'pending'
   | 'processing'
   | 'processed'
+  | 'preserved'
   | 'failed'
   | 'not_applicable';
 
@@ -110,6 +138,7 @@ export const ACCESSIBILITY_STATUSES = [
   'pending',
   'processing',
   'processed',
+  'preserved',
   'failed',
   'not_applicable',
 ] as const satisfies readonly AccessibilityStatus[];
@@ -158,6 +187,19 @@ export interface Program {
   effective_date: string | null;
   retrieved_at: IsoTimestamp;
   verified: boolean;
+
+  /* ---- M1 columns (docs/M1_CONTRACT.md §2). Optional here so pre-M1 code
+   * keeps compiling; REQUIRED on `ResolvedProgram` (lib/m1/contract.ts),
+   * which is what every M1 module returns. Xano returns "" / 0 / null, never
+   * undefined, for these once the columns exist. ---- */
+  category?: NeedCategory;
+  form_kind?: FormKind;
+  organization_id?: Id | null;
+  submission_instructions?: string;
+  field_count?: number;
+  region?: string;
+  page_count?: number;
+  sha256?: string;
 }
 
 /** Xano table `cases`. */
@@ -173,6 +215,14 @@ export interface Case {
   progress_percent: number;
   created_at: IsoTimestamp;
   updated_at: IsoTimestamp;
+
+  /* ---- M1 columns (docs/M1_CONTRACT.md §5). Optional for compatibility. ---- */
+  need_category?: NeedCategory;
+  location?: string;
+  caller_phone?: string;
+  situation_text?: string;
+  delivery_status?: CaseDeliveryStatus;
+  organization_id?: Id | null;
 }
 
 /** Xano table `form_schema`. One row per question we may ask. */
@@ -193,6 +243,17 @@ export interface FormSchemaField {
   dependency_rule: string | null;
   /** Target AcroForm field name for Instant JSON. Usually equal to `field_id`. */
   pdf_mapping: string;
+
+  /* ---- M1 columns (docs/M1_CONTRACT.md §2). Optional here; REQUIRED on
+   * `M1FormSchemaField` (lib/m1/contract.ts), which understandForm() emits. ---- */
+  /** Interview section key, snake_case. Drives the /live progress model. */
+  section?: string;
+  /** 1-based asking order across the whole form. */
+  order?: number;
+  /** Export values for button/radio/choice fields, WITHOUT the leading "/". */
+  options?: string[];
+  /** Exact AcroForm field name to write. Equals `field_id` for fillable PDFs. */
+  pdf_field_name?: string;
 }
 
 /** Xano table `answers`. */
@@ -262,6 +323,10 @@ export interface CaseBundle {
   requirements: Requirement[];
   documents: CaseDocument[];
   events: CaseEvent[];
+  /** M1: present when the case is linked to an `organizations` row. */
+  organization?: Organization | null;
+  /** M1: every send attempt for the case, oldest first. */
+  deliveries?: Delivery[];
 }
 
 /* ------------------------------------------------------------------ */
@@ -316,8 +381,17 @@ export interface CaseProgress {
   status: CaseStatus;
   /** 0-100. */
   percent: number;
-  /** Always 8 entries, in `PROGRESS_STEP_IDS` order. */
+  /**
+   * Always 8 entries, in `PROGRESS_STEP_IDS` order. In M1 these are DERIVED
+   * from `sections` (see LEGACY_STEP_SECTION_ALIASES); the hardcoded step
+   * list is no longer the source of truth for the interview.
+   */
   steps: ProgressStep[];
+  /**
+   * M1: the form's own sections, ordered, computed by Xano from form_schema.
+   * When present, /live renders these instead of the fixed field steps.
+   */
+  sections?: InterviewSection[];
   /** Answers saved so far — "12 of 17 answers" in the mockup. */
   answersSaved: number;
   answersExpected: number;
@@ -383,6 +457,12 @@ export interface DiscoveryResult {
   policy_url: string;
   application_url: string;
   from_cache: boolean;
+  /**
+   * False when no verified official source exists for the organization the
+   * caller named. A not-found result must never be filled from.
+   */
+  found?: boolean;
+  not_found_reason?: string;
 }
 
 /** Preference order from API_INTEGRATIONS.md. Index 0 is most trusted. */
@@ -626,7 +706,12 @@ export const VOICE_STATE_LABELS: Readonly<Record<VoiceState, string>> = {
   ended: 'Call ended',
 };
 
-/** The six tools exposed to the voice agent (API_INTEGRATIONS.md §4). */
+/**
+ * The ORIGINAL six tools (API_INTEGRATIONS.md §4). Kept verbatim because
+ * `VapiToolName` is used as a closed Record key in the voice layer. The M1
+ * tool set (eight tools + the `get_case_progress` alias) is
+ * `M1_VOICE_TOOL_NAMES` in lib/m1/contract.ts; new code uses that.
+ */
 export const VAPI_TOOL_NAMES = [
   'create_case',
   'discover_program',

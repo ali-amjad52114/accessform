@@ -1,9 +1,10 @@
 // GET /cases/{id} - the whole case in one read: CaseBundle.
 // {id} accepts either the numeric primary key or the human reference
 // ("AF-001"), so the demo can deep-link without knowing Xano's ids.
+// M1 adds `organization` (the case's, else the program's) and `deliveries`.
 query "cases/{id}" verb=GET {
   api_group = "AccessForm"
-  description = "Case + hospital + program + answers + requirements + documents + events."
+  description = "Case + hospital + program + organization + answers + requirements + documents + events + deliveries."
 
   input {
     text id filters=trim
@@ -43,6 +44,24 @@ query "cases/{id}" verb=GET {
       field_value = $case.program_id
     } as $program
 
+    var $organization_id { value = $case.organization_id ?? 0 }
+    conditional {
+      if ($organization_id == 0 && $program != null) {
+        var.update $organization_id { value = $program.organization_id ?? 0 }
+      }
+    }
+
+    var $organization { value = null }
+    conditional {
+      if ($organization_id > 0) {
+        db.get organizations {
+          field_name = "id"
+          field_value = $organization_id
+        } as $found_org
+        var.update $organization { value = $found_org }
+      }
+    }
+
     db.query answers {
       where = $db.answers.case_id == $case.id
       sort = {id: "asc"}
@@ -67,6 +86,12 @@ query "cases/{id}" verb=GET {
       return = {type: "list"}
     } as $events
 
+    db.query deliveries {
+      where = $db.deliveries.case_id == $case.id
+      sort = {id: "asc"}
+      return = {type: "list"}
+    } as $deliveries
+
     // The contract calls the event time `timestamp`; the column is `created_at`.
     var $event_feed {
       value = $events|map:{
@@ -85,10 +110,12 @@ query "cases/{id}" verb=GET {
     case        : $case
     hospital    : $hospital
     program     : $program
+    organization: $organization
     answers     : $answers
     requirements: $requirements
     documents   : $documents
     events      : $event_feed
+    deliveries  : $deliveries
   }
   tags = ["accessform"]
   guid = "yPXfBKj7xxKfC6HEzxsSLPpyHpY"

@@ -1,4 +1,4 @@
-// One patient's attempt at one application. The spine of the demo.
+// One caller's attempt at one application. The spine of the product.
 table cases {
   auth = false
 
@@ -7,7 +7,7 @@ table cases {
     timestamp created_at?=now
     timestamp updated_at?=now
 
-    // Display name only. The slice deliberately stores no patient identifiers.
+    // Display name only. The product deliberately stores no identifiers.
     text patient_display_name? filters=trim
 
     int hospital_id? {
@@ -29,6 +29,29 @@ table cases {
     // Human-facing case reference used by the demo and the voice agent
     // (e.g. "AF-001"), so a case can be addressed without knowing the numeric PK.
     text? external_ref? filters=trim
+
+    // ---- M1 columns (docs/M1_CONTRACT.md section 5) ----
+
+    enum need_category?="other" {
+      values = ["hospital_financial_assistance", "paratransit", "disability_accommodation", "scholarship_financial_aid", "benefits", "appointment", "other"]
+    }
+
+    // What the caller said about where they are, verbatim-ish.
+    text location? filters=trim
+
+    // E.164 when known. Never spoken back in full; masks are last-4 only.
+    text caller_phone? filters=trim
+
+    // The caller's own words, first turn. Never read back to them.
+    text situation_text?
+
+    enum delivery_status?="none" {
+      values = ["none", "queued", "sent", "failed"]
+    }
+
+    int organization_id? {
+      table = "organizations"
+    }
   }
 
   index = [

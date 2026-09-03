@@ -23,7 +23,7 @@ query "cases/{id}/documents" verb=POST {
     // Contract vocabulary. Only "processed" may be described in UI copy as
     // "accessibility processed".
     enum accessibility_status?="pending" {
-      values = ["pending", "processing", "processed", "failed", "not_applicable"]
+      values = ["pending", "processing", "processed", "preserved", "failed", "not_applicable"]
     }
 
     text? version_hash?

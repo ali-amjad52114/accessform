@@ -11,9 +11,13 @@
  * key returns 401. The base URL is not configurable and there are no
  * `NUTRIENT_*_URL` env vars.
  *
- * Form filling works through /build with Instant JSON. The `flatten` action is
- * REQUIRED — without it every value renders blank. The multipart parts must be
- * named exactly "document" (the PDF) and "instant" (the JSON).
+ * Form filling and the accessibility step go through `lib/document/engine.ts`,
+ * which picks the engine from `DOCUMENT_ENGINE`:
+ *   local    (default) pdf-lib fill + flatten; the official document's own
+ *                      tagging is preserved -> accessibility_status 'preserved'.
+ *   nutrient (opt-in)  POST /build with Instant JSON (`flatten` REQUIRED) and
+ *                      POST /accessibility/autotag -> 'processed', or 'failed'
+ *                      on HTTP 402 when the account is out of credit.
  *
  * SERVER-SIDE ONLY. These three keys must never reach the browser; the
  * browser-safe `pdf_pub_live_` viewer key is a different credential and 401s on
@@ -25,13 +29,10 @@
 
 import {
   CEDARS_APPLICATION_PDF_URL,
-  DEMO_FILLED_PDF_PATH,
   INSTANT_JSON_FIELD_TYPE,
   INSTANT_JSON_FORMAT,
-  NUTRIENT_BUILD_INSTRUCTIONS,
-  NUTRIENT_BUILD_PART_DOCUMENT,
-  NUTRIENT_BUILD_PART_INSTANT,
   NUTRIENT_ENDPOINTS,
+  type AccessibilityStatus,
   type Answer,
   type CaseBundle,
   type ExtractedElement,
@@ -48,22 +49,58 @@ import {
   type TaggedDocument,
   type XanoAdapter,
 } from '../contract';
+import {
+  fillAndFlatten,
+  processAccessibility,
+  resolveEngine,
+  type DocumentEngine,
+} from '../document/engine';
 import { CEDARS_FORM_FIELDS } from '../fixtures/cedars-fields';
 import { FixtureNutrientAdapter, fixtureNutrientAdapter } from '../fixtures/nutrient';
-import { isBrowser, nutrientKeys } from './env';
+import { documentEngine, hasAllNutrientKeys, isBrowser, nutrientKeys } from './env';
 import { AdapterError, recordFallback, withFallback } from './errors';
-import {
-  bytesToBlob,
-  contentHash,
-  fetchBytes,
-  LONG_TIMEOUT_MS,
-  request,
-  requestBytes,
-} from './http';
+import { bytesToBlob, contentHash, fetchBytes, LONG_TIMEOUT_MS, request } from './http';
 import { createXanoAdapter } from './xano';
 
 const PDF_MIME = 'application/pdf';
-const JSON_MIME = 'application/json';
+
+/* ------------------------------------------------------------------ */
+/* Accessibility status copy                                           */
+/* ------------------------------------------------------------------ */
+
+export interface AccessibilityEventCopy {
+  event_type: string;
+  message: string;
+}
+
+/**
+ * The one place that turns an `AccessibilityStatus` into feed copy. Only
+ * `processed` may claim that processing ran; `preserved` says exactly what
+ * happened (the official document's own tagging was kept); everything else
+ * stays honest about the pass not having completed.
+ */
+export function accessibilityEventFor(status: AccessibilityStatus): AccessibilityEventCopy {
+  switch (status) {
+    case 'processed':
+      return { event_type: 'accessibility_processed', message: 'Accessibility processing complete' };
+    case 'preserved':
+      return {
+        event_type: 'accessibility_preserved',
+        message: "Official document's accessibility tagging preserved",
+      };
+    case 'failed':
+      return { event_type: 'accessibility_failed', message: 'Accessibility processing unavailable' };
+    case 'processing':
+      return { event_type: 'accessibility_processing', message: 'Accessibility processing running' };
+    case 'pending':
+      return { event_type: 'accessibility_pending', message: 'Accessibility processing not yet run' };
+    case 'not_applicable':
+      return {
+        event_type: 'accessibility_not_applicable',
+        message: 'Accessibility processing does not apply',
+      };
+  }
+}
 
 /** Extraction request body, matching the proven Python client. */
 const EXTRACTION_INSTRUCTIONS = {
@@ -360,26 +397,36 @@ async function writeGeneratedFile(
 /* ------------------------------------------------------------------ */
 
 export interface LiveNutrientAdapterOptions {
-  processorKey: string;
-  extractionKey: string;
-  accessibilityKey: string;
+  /**
+   * Nutrient keys are optional: with `DOCUMENT_ENGINE=local` the fill and
+   * accessibility step run on pdf-lib and need none of them. Only
+   * `extractFormStructure` still talks to Nutrient directly.
+   */
+  processorKey?: string;
+  extractionKey?: string;
+  accessibilityKey?: string;
+  /** Override `DOCUMENT_ENGINE` for this adapter instance. */
+  engine?: DocumentEngine;
   xano?: XanoAdapter;
   fallback?: NutrientAdapter;
 }
 
 export class LiveNutrientAdapter implements NutrientAdapter {
-  private readonly processorKey: string;
-  private readonly extractionKey: string;
-  private readonly accessibilityKey: string;
+  private readonly extractionKey: string | undefined;
+  private readonly engine: DocumentEngine | undefined;
   private readonly xano: XanoAdapter;
   private readonly fallback: NutrientAdapter;
 
-  constructor(options: LiveNutrientAdapterOptions) {
-    this.processorKey = options.processorKey;
+  constructor(options: LiveNutrientAdapterOptions = {}) {
     this.extractionKey = options.extractionKey;
-    this.accessibilityKey = options.accessibilityKey;
+    this.engine = options.engine;
     this.xano = options.xano ?? createXanoAdapter();
     this.fallback = options.fallback ?? fixtureNutrientAdapter;
+  }
+
+  /** Engine for this call: explicit option, else `DOCUMENT_ENGINE`. */
+  private resolveEngine(): DocumentEngine {
+    return this.engine ?? resolveEngine();
   }
 
   /** Resolve `pdfBytes` / `pdfUrl` into bytes. */
@@ -407,6 +454,13 @@ export class LiveNutrientAdapter implements NutrientAdapter {
       'nutrient',
       'extractFormStructure',
       async () => {
+        if (!this.extractionKey) {
+          throw new AdapterError(
+            'nutrient',
+            'extractFormStructure',
+            'NUTRIENT_DATA_EXTRACTION_API is not set; using the verified field map',
+          );
+        }
         const { bytes, url } = await this.sourceBytes(input);
 
         const form = new FormData();
@@ -438,57 +492,54 @@ export class LiveNutrientAdapter implements NutrientAdapter {
     );
   }
 
-  /* --- POST /build (applyInstantJson + flatten) ---------------------- */
+  /* --- Fill + flatten (engine) --------------------------------------- */
 
+  /**
+   * Fill and flatten through the configured engine. `local` runs pdf-lib on
+   * this server; `nutrient` POSTs /build (and falls back to local inside the
+   * engine on 401/402/403). Only a hard failure of both degrades to the fixture.
+   */
   async fillForm(input: FillFormInput): Promise<FilledDocument> {
-    return withFallback(
+    const { engine: _engine, ...filled } = await this.fillFormWithEngine(input);
+    return filled;
+  }
+
+  /**
+   * `fillForm` plus the engine that actually produced the bytes — `local`
+   * after a Nutrient 401/402/403 fallback, or `fixture` when even the local
+   * engine failed and the placeholder answered. Recorded on the event feed so
+   * nothing is labelled Nutrient output that Nutrient did not produce.
+   */
+  private async fillFormWithEngine(
+    input: FillFormInput,
+  ): Promise<FilledDocument & { engine: DocumentEngine | 'fixture' }> {
+    return withFallback<FilledDocument & { engine: DocumentEngine | 'fixture' }>(
       'nutrient',
       'fillForm',
       async () => {
         const { bytes } = await this.sourceBytes(input);
+        const result = await fillAndFlatten(bytes, input.instantJson, this.resolveEngine());
 
-        const form = new FormData();
-        // The exact instruction shape proven to fill the Cedars AcroForm.
-        // `flatten` is required or every value renders blank.
-        form.append('instructions', JSON.stringify(NUTRIENT_BUILD_INSTRUCTIONS));
-        form.append(
-          NUTRIENT_BUILD_PART_DOCUMENT,
-          bytesToBlob(bytes, PDF_MIME),
-          'document.pdf',
-        );
-        form.append(
-          NUTRIENT_BUILD_PART_INSTANT,
-          new Blob([JSON.stringify(input.instantJson)], { type: JSON_MIME }),
-          'instant.json',
-        );
-
-        const pdfBytes = await requestBytes(
-          'nutrient',
-          'build',
-          NUTRIENT_ENDPOINTS.build,
-          {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${this.processorKey}` },
-            body: form,
-            timeoutMs: LONG_TIMEOUT_MS,
-          },
-        );
-
-        if (pdfBytes.byteLength === 0) {
-          throw new AdapterError('nutrient', 'build', 'build returned an empty document');
+        if (result.pdfBytes.byteLength === 0) {
+          throw new AdapterError(
+            'nutrient',
+            'fillForm',
+            `${result.engine} engine returned an empty document`,
+          );
         }
 
         return {
-          pdfBytes,
-          byteLength: pdfBytes.byteLength,
-          versionHash: contentHash(pdfBytes),
+          pdfBytes: result.pdfBytes,
+          byteLength: result.pdfBytes.byteLength,
+          versionHash: contentHash(result.pdfBytes),
+          engine: result.engine,
         };
       },
-      () => this.fallback.fillForm(input),
+      async () => ({ ...(await this.fallback.fillForm(input)), engine: 'fixture' as const }),
     );
   }
 
-  /* --- POST /accessibility/autotag ----------------------------------- */
+  /* --- Accessibility step (engine) ----------------------------------- */
 
   /**
    * Note the deliberate asymmetry with the other two calls: this one does NOT
@@ -497,35 +548,28 @@ export class LiveNutrientAdapter implements NutrientAdapter {
    * The fixture reports `accessibilityStatus: 'processed'`, and 'processed' is
    * the one value the UI is allowed to describe as "accessibility processed".
    * Claiming that after a failed live call would be a false accessibility
-   * claim about a real document. So a live failure returns the untouched bytes
-   * with status `'failed'` — the document is still produced and /review still
-   * renders, but nothing may say the accessibility pass ran.
+   * claim about a real document. So the status is whatever the engine
+   * reports — `processed` (Nutrient autotag ran), `preserved` (local engine
+   * kept the official document's own tagging), or `failed` — and an exception
+   * becomes `failed` with the untouched bytes.
    */
   async autotag(pdfBytes: Uint8Array): Promise<TaggedDocument> {
     try {
-      const form = new FormData();
-      form.append('file', bytesToBlob(pdfBytes, PDF_MIME), 'document.pdf');
+      const result = await processAccessibility(pdfBytes, this.resolveEngine());
 
-      const tagged = await requestBytes(
-        'nutrient',
-        'accessibilityAutotag',
-        NUTRIENT_ENDPOINTS.accessibilityAutotag,
-        {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${this.accessibilityKey}` },
-          body: form,
-          timeoutMs: LONG_TIMEOUT_MS,
-        },
-      );
-
-      if (tagged.byteLength === 0) {
-        throw new AdapterError('nutrient', 'autotag', 'autotag returned no document');
+      if (result.pdfBytes.byteLength === 0) {
+        throw new AdapterError('nutrient', 'autotag', 'accessibility step returned no document');
+      }
+      if (result.status === 'failed' && typeof console !== 'undefined') {
+        console.warn(
+          `[accessform] accessibility step did not complete (${result.engine}). ${result.note ?? ''}`.trim(),
+        );
       }
 
       return {
-        pdfBytes: tagged,
-        byteLength: tagged.byteLength,
-        accessibilityStatus: 'processed',
+        pdfBytes: result.pdfBytes,
+        byteLength: result.pdfBytes.byteLength,
+        accessibilityStatus: result.status,
       };
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -537,7 +581,7 @@ export class LiveNutrientAdapter implements NutrientAdapter {
       });
       if (typeof console !== 'undefined') {
         console.warn(
-          `[accessform] nutrient.autotag failed; document kept UNTAGGED. ${reason}`,
+          `[accessform] accessibility step threw; document kept as filled. ${reason}`,
         );
       }
       const copy = new Uint8Array(pdfBytes.byteLength);
@@ -559,8 +603,11 @@ export class LiveNutrientAdapter implements NutrientAdapter {
 
     const instantJson = buildInstantJson(bundle.answers);
     const fieldsFilled = instantJson.formFieldValues.length;
+    const requestedEngine = this.resolveEngine();
 
-    const filled = await this.fillForm({ pdfUrl: sourceUrl, instantJson });
+    const filled = await this.fillFormWithEngine({ pdfUrl: sourceUrl, instantJson });
+    // What actually filled the document, after any fallback inside the engine.
+    const engine = filled.engine;
     const tagged = await this.autotag(filled.pdfBytes);
 
     const versionHash = contentHash(tagged.pdfBytes);
@@ -568,13 +615,19 @@ export class LiveNutrientAdapter implements NutrientAdapter {
 
     const fileName = `case-${encodeURIComponent(input.case_id)}-${versionHash.slice(0, 12)}.pdf`;
     const writtenPath = await writeGeneratedFile(fileName, tagged.pdfBytes);
-    // If nothing could be written, /review still has a real document to show.
-    const documentUrl = writtenPath ?? DEMO_FILLED_PDF_PATH;
+    // The URL the viewer loads is the same-origin API route: it is served in
+    // every mode (Next only serves `public/` files that existed at build time,
+    // so a file written now answers 404 under `next start`), it never falls
+    // back to the bundled fixture, and it regenerates byte-identical output
+    // from the same answers with the same engine. The file on disk is the
+    // immutable artifact recorded on the Xano row whenever it could be written.
+    const documentUrl = `/api/document/${encodeURIComponent(input.case_id)}`;
+    const generatedUrl = writtenPath ?? documentUrl;
 
     const document = await this.xano.saveDocument(input.case_id, {
       type: 'filled_application',
       source_url: sourceUrl,
-      generated_url: documentUrl,
+      generated_url: generatedUrl,
       accessibility_status: tagged.accessibilityStatus,
       version_hash: versionHash,
     });
@@ -583,20 +636,21 @@ export class LiveNutrientAdapter implements NutrientAdapter {
       actor: 'nutrient',
       event_type: 'document_generated',
       message: 'Completed PDF generated',
-      metadata_json: { fields_filled: fieldsFilled, bytes: filled.byteLength },
+      metadata_json: {
+        fields_filled: fieldsFilled,
+        bytes: filled.byteLength,
+        engine,
+        requested_engine: requestedEngine,
+      },
     });
-    // Only claim the accessibility pass ran when it actually did.
+    // The feed copy is derived from the real status: only 'processed' claims
+    // that an accessibility pass ran.
+    const accessCopy = accessibilityEventFor(tagged.accessibilityStatus);
     await this.xano.appendEvent(input.case_id, {
       actor: 'nutrient',
-      event_type:
-        tagged.accessibilityStatus === 'processed'
-          ? 'accessibility_processed'
-          : 'accessibility_failed',
-      message:
-        tagged.accessibilityStatus === 'processed'
-          ? 'Accessibility processing complete'
-          : 'Accessibility processing unavailable',
-      metadata_json: { accessibility_status: tagged.accessibilityStatus },
+      event_type: accessCopy.event_type,
+      message: accessCopy.message,
+      metadata_json: { accessibility_status: tagged.accessibilityStatus, engine },
     });
 
     return {
@@ -611,12 +665,15 @@ export class LiveNutrientAdapter implements NutrientAdapter {
 }
 
 /**
- * Live Nutrient client when all three server keys are present, otherwise the
- * fixture. Never throws for missing configuration.
+ * Live document adapter. With `DOCUMENT_ENGINE=local` (the default) it works
+ * with zero Nutrient keys — the fill runs on pdf-lib and `extractFormStructure`
+ * answers from the verified field map. With `DOCUMENT_ENGINE=nutrient` all
+ * three server keys are still required, otherwise the fixture answers.
+ * Never throws for missing configuration.
  */
 export function createNutrientAdapter(xano?: XanoAdapter): NutrientAdapter {
   const keys = nutrientKeys();
-  if (!keys.processor || !keys.extraction || !keys.accessibility) {
+  if (documentEngine() === 'nutrient' && !hasAllNutrientKeys()) {
     // Bind the fixture to the caller's store so finalizeDocument still persists.
     return xano ? new FixtureNutrientAdapter(xano) : fixtureNutrientAdapter;
   }

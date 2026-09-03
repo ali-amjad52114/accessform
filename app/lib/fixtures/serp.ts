@@ -27,7 +27,7 @@ function normalize(input: DiscoverProgramInput): DiscoveryResult {
   const verified = rankSources(allResults.filter((source) => source.verified));
 
   return {
-    hospital: input.hospital || CACHED_DISCOVERY.hospital,
+    hospital: CACHED_DISCOVERY.hospital,
     intent: input.intent || CACHED_DISCOVERY.intent,
     retrieved_at: CACHED_DISCOVERY.retrieved_at,
     searches_used: 0,

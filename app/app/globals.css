@@ -1001,3 +1001,50 @@ kbd {
     padding: 24px;
   }
 }
+
+/* --- M1: need-agnostic home + section-driven live screen ---------- */
+
+/* Primary CTA with the phone number underneath the label. */
+.af-btn__stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.15;
+  text-align: left;
+}
+
+.af-btn__sub {
+  font-size: 17px;
+  font-weight: 600;
+  opacity: 0.92;
+  letter-spacing: 0.01em;
+}
+
+/* Three example utterances, one per catalog need. */
+.af-hero__examples {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.af-hero__examples .af-hero__quote {
+  margin: 0;
+}
+
+/* Section label above the field key in the live form row. */
+.af-formstate__section {
+  display: block;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--af-muted);
+  margin-bottom: 2px;
+}
+
+/* "3 of 8 answered" beside a section row in the progress list. */
+.af-progress__detail {
+  font-size: 16px;
+  font-weight: 400;
+  color: var(--af-muted);
+}

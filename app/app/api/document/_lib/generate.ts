@@ -1,18 +1,20 @@
 /**
- * Server-side Nutrient document pipeline.
+ * Server-side document pipeline.
  *
  * Folders prefixed with `_` are ignored by the App Router, so this module is
- * shared code, not a route. It runs ONLY on the server: the three Nutrient
- * server keys are read from process.env and never reach the browser.
+ * shared code, not a route. It runs ONLY on the server.
  *
- * Pipeline (verified live against api.nutrient.io):
+ * Pipeline:
  *   1. GET the official HCAI application PDF (394,890 bytes, 101 AcroForm fields)
- *   2. POST /build   with actions [applyInstantJson, flatten]
- *        - `flatten` is REQUIRED. Without it every value renders blank.
- *        - multipart parts must be named exactly "document" and "instant"
- *   3. POST /accessibility/autotag on the filled bytes
+ *   2. fillAndFlatten()        — `lib/document/engine.ts` picks the engine:
+ *        local    (default)    pdf-lib fill + flatten. No paid API, no watermark.
+ *        nutrient (opt-in)     POST /build with [applyInstantJson, flatten].
+ *   3. processAccessibility()  — local: verify the official document's own
+ *                                tagging survived -> 'preserved';
+ *                                nutrient: POST /accessibility/autotag -> 'processed'.
  *
- * Results are cached on disk so repeated demo runs never re-bill the API.
+ * Results are cached on disk per engine so repeated demo runs never re-bill
+ * the API and a watermarked Nutrient artifact is never served as local output.
  */
 
 import { createHash } from 'node:crypto';
@@ -26,15 +28,20 @@ import {
   DEMO_FILLED_PDF_PATH,
   INSTANT_JSON_FIELD_TYPE,
   INSTANT_JSON_FORMAT,
-  NUTRIENT_BUILD_INSTRUCTIONS,
-  NUTRIENT_BUILD_PART_DOCUMENT,
-  NUTRIENT_BUILD_PART_INSTANT,
-  NUTRIENT_ENDPOINTS,
+  type AccessibilityStatus,
   type Answer,
   type Id,
   type InstantJson,
   type InstantJsonFormFieldValue,
 } from '../../../../lib/contract';
+import {
+  fillAndFlatten,
+  processAccessibility,
+  resolveEngine,
+  type AccessibilityResult,
+  type DocumentEngine,
+  type FillResult,
+} from '../../../../lib/document/engine';
 import type { GeneratedDocument } from './types';
 
 /* ------------------------------------------------------------------ */
@@ -109,7 +116,7 @@ export function formatAnswerValue(value: Answer['value_json']): string {
   return text.startsWith('$') ? text.slice(1).trim() : text;
 }
 
-/** Map saved answers into the exact Instant JSON shape /build accepts. */
+/** Map saved answers into the exact Instant JSON shape both engines accept. */
 export function buildInstantJson(answers: readonly Answer[]): InstantJson {
   const formFieldValues: InstantJsonFormFieldValue[] = [];
   const seen = new Set<string>();
@@ -126,31 +133,16 @@ export function buildInstantJson(answers: readonly Answer[]): InstantJson {
 }
 
 /* ------------------------------------------------------------------ */
-/* Nutrient calls                                                      */
+/* Source fetch + engine calls                                         */
 /* ------------------------------------------------------------------ */
 
+/** Kept for callers that still key on an HTTP status from the document layer. */
 export class NutrientError extends Error {
   readonly status: number;
   constructor(endpoint: string, status: number, detail: string) {
     super(`${endpoint} -> HTTP ${status}: ${detail.slice(0, 300)}`);
     this.name = 'NutrientError';
     this.status = status;
-  }
-}
-
-function requireKey(name: string): string {
-  const value = process.env[name];
-  if (!value) throw new Error(`${name} is not set in the server environment`);
-  return value;
-}
-
-async function postWithTimeout(url: string, init: RequestInit): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    return await fetch(url, { ...init, method: 'POST', signal: controller.signal, cache: 'no-store' });
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -169,64 +161,42 @@ export async function fetchSourcePdf(url: string = CEDARS_APPLICATION_PDF_URL): 
   }
 }
 
-function toBlob(bytes: Uint8Array, type: string): Blob {
-  // Copy into a plain ArrayBuffer so the Blob constructor is happy under
-  // TypeScript's stricter ArrayBufferLike typing.
-  const copy = new Uint8Array(bytes.byteLength);
-  copy.set(bytes);
-  return new Blob([copy.buffer], { type });
+/**
+ * Fill + flatten through the configured engine. Returns the bytes only;
+ * use `fillFormDetailed` when the engine / skipped-field report matters.
+ */
+export async function fillForm(
+  pdfBytes: Uint8Array,
+  instantJson: InstantJson,
+  engine: DocumentEngine = resolveEngine(),
+): Promise<Uint8Array> {
+  return (await fillFormDetailed(pdfBytes, instantJson, engine)).pdfBytes;
+}
+
+export async function fillFormDetailed(
+  pdfBytes: Uint8Array,
+  instantJson: InstantJson,
+  engine: DocumentEngine = resolveEngine(),
+): Promise<FillResult> {
+  const result = await fillAndFlatten(pdfBytes, instantJson, engine);
+  if (result.pdfBytes.byteLength === 0) {
+    throw new Error(`${result.engine} engine returned an empty document`);
+  }
+  return result;
 }
 
 /**
- * POST /build — apply Instant JSON to the AcroForm, then flatten.
- * Auth: NUTRIENT_DWS_PROCESSOR_API.
+ * Accessibility step through the configured engine. Resolves with the bytes
+ * when the status is `processed` or `preserved`; rejects otherwise so legacy
+ * callers keep their "throw means it did not run" contract.
  */
-export async function fillForm(pdfBytes: Uint8Array, instantJson: InstantJson): Promise<Uint8Array> {
-  const form = new FormData();
-  form.append('instructions', JSON.stringify(NUTRIENT_BUILD_INSTRUCTIONS));
-  form.append(
-    NUTRIENT_BUILD_PART_DOCUMENT,
-    toBlob(pdfBytes, 'application/pdf'),
-    'application.pdf',
-  );
-  form.append(
-    NUTRIENT_BUILD_PART_INSTANT,
-    new Blob([JSON.stringify(instantJson)], { type: 'application/json' }),
-    'instant.json',
-  );
-
-  const response = await postWithTimeout(NUTRIENT_ENDPOINTS.build, {
-    headers: { Authorization: `Bearer ${requireKey('NUTRIENT_DWS_PROCESSOR_API')}` },
-    body: form,
-  });
-
-  if (!response.ok) {
-    throw new NutrientError('/build', response.status, await response.text().catch(() => ''));
-  }
-  return new Uint8Array(await response.arrayBuffer());
-}
-
-/**
- * POST /accessibility/autotag — PDF/UA tagging pass.
- * Auth: NUTRIENT_ACCESSIBILITY_API.
- */
-export async function autotag(pdfBytes: Uint8Array): Promise<Uint8Array> {
-  const form = new FormData();
-  form.append('file', toBlob(pdfBytes, 'application/pdf'), 'filled.pdf');
-
-  const response = await postWithTimeout(NUTRIENT_ENDPOINTS.accessibilityAutotag, {
-    headers: { Authorization: `Bearer ${requireKey('NUTRIENT_ACCESSIBILITY_API')}` },
-    body: form,
-  });
-
-  if (!response.ok) {
-    throw new NutrientError(
-      '/accessibility/autotag',
-      response.status,
-      await response.text().catch(() => ''),
-    );
-  }
-  return new Uint8Array(await response.arrayBuffer());
+export async function autotag(
+  pdfBytes: Uint8Array,
+  engine: DocumentEngine = resolveEngine(),
+): Promise<Uint8Array> {
+  const result = await processAccessibility(pdfBytes, engine);
+  if (result.status === 'processed' || result.status === 'preserved') return result.pdfBytes;
+  throw new Error(result.note ?? `accessibility step ended with status ${result.status}`);
 }
 
 /* ------------------------------------------------------------------ */
@@ -239,28 +209,53 @@ export interface GeneratedDocumentWithBytes extends GeneratedDocument {
   pdfBytes: Uint8Array;
 }
 
-function versionHashFor(caseId: Id, instantJson: InstantJson, sourceUrl: string): string {
+type CacheSuffix = 'filled' | 'tagged';
+
+/**
+ * The engine is part of the hash: a Nutrient-generated (possibly watermarked)
+ * cache entry must never be served when the engine is `local`, and vice versa.
+ */
+function versionHashFor(
+  caseId: Id,
+  instantJson: InstantJson,
+  sourceUrl: string,
+  engine: DocumentEngine,
+): string {
   return createHash('sha256')
     .update(caseId)
     .update(sourceUrl)
+    .update(engine)
     .update(JSON.stringify(instantJson.formFieldValues))
     .digest('hex')
     .slice(0, 16);
 }
 
-async function readCached(hash: string, suffix: 'tagged' | 'filled'): Promise<Uint8Array | null> {
+function cachePath(hash: string, engine: DocumentEngine, suffix: CacheSuffix): string {
+  return path.join(CACHE_DIR, `${hash}.${engine}.${suffix}.pdf`);
+}
+
+async function readCached(
+  hash: string,
+  engine: DocumentEngine,
+  suffix: CacheSuffix,
+): Promise<Uint8Array | null> {
   try {
-    const bytes = await readFile(path.join(CACHE_DIR, `${hash}.${suffix}.pdf`));
+    const bytes = await readFile(cachePath(hash, engine, suffix));
     return bytes.byteLength > 0 ? new Uint8Array(bytes) : null;
   } catch {
     return null;
   }
 }
 
-async function writeCached(hash: string, suffix: 'tagged' | 'filled', bytes: Uint8Array): Promise<void> {
+async function writeCached(
+  hash: string,
+  engine: DocumentEngine,
+  suffix: CacheSuffix,
+  bytes: Uint8Array,
+): Promise<void> {
   try {
     await mkdir(CACHE_DIR, { recursive: true });
-    await writeFile(path.join(CACHE_DIR, `${hash}.${suffix}.pdf`), bytes);
+    await writeFile(cachePath(hash, engine, suffix), bytes);
   } catch {
     /* a read-only filesystem must not break the demo */
   }
@@ -275,6 +270,48 @@ async function readFixture(): Promise<Uint8Array | null> {
   }
 }
 
+/** Honest, short note describing what the accessibility step actually did. */
+function accessibilityNote(result: AccessibilityResult): string | null {
+  switch (result.status) {
+    case 'processed':
+      return result.note;
+    case 'preserved':
+      return (
+        result.note ??
+        "No accessibility pass ran; the official document's tagging was preserved."
+      );
+    case 'failed':
+      return result.note ?? 'The accessibility pass did not complete for this document.';
+    case 'pending':
+    case 'processing':
+    case 'not_applicable':
+      return result.note;
+  }
+}
+
+/** Notes about the fill itself (engine fallback, unmatched answers). */
+function fillNotes(requested: DocumentEngine, fill: FillResult): string[] {
+  const notes: string[] = [];
+  if (fill.note) {
+    notes.push(fill.note);
+  } else if (fill.engine !== requested) {
+    notes.push(
+      `The ${requested} engine was unavailable, so the document was filled with the ${fill.engine} engine.`,
+    );
+  }
+  if (fill.fieldsSkipped.length > 0) {
+    notes.push(
+      `${fill.fieldsSkipped.length} answer${fill.fieldsSkipped.length === 1 ? '' : 's'} did not match a field on the official form and ${fill.fieldsSkipped.length === 1 ? 'was' : 'were'} left blank.`,
+    );
+  }
+  return notes;
+}
+
+function joinNotes(parts: Array<string | null | undefined>): string | null {
+  const text = parts.filter((p): p is string => Boolean(p && p.trim())).join(' ');
+  return text.length > 0 ? text : null;
+}
+
 /** In-flight de-duplication so two viewers do not bill /build twice. */
 const inFlight = new Map<string, Promise<GeneratedDocumentWithBytes>>();
 
@@ -284,19 +321,23 @@ export interface FinalizeOptions {
   sourceUrl?: string;
   /** Skip the network entirely and answer from cache/fixture only. */
   cachedOnly?: boolean;
+  /** Override `DOCUMENT_ENGINE` for this call. */
+  engine?: DocumentEngine;
 }
 
 /**
- * Fill + tag the official application for a case, memoized on disk.
- * Never throws in demo mode: it degrades to the bundled fixture.
+ * Fill + accessibility-step the official application for a case, memoized on
+ * disk per engine. Never throws in demo mode: it degrades to the bundled
+ * fixture. Outside demo mode the fixture is never served.
  */
 export function finalizeDocument(options: FinalizeOptions = {}): Promise<GeneratedDocumentWithBytes> {
   const caseId = options.caseId ?? DEMO_CASE_ID;
   const answers = options.answers ?? DEMO_ANSWERS;
   const sourceUrl = options.sourceUrl ?? CEDARS_APPLICATION_PDF_URL;
+  const engine = options.engine ?? resolveEngine();
   const instantJson = buildInstantJson(answers);
-  const hash = versionHashFor(caseId, instantJson, sourceUrl);
-  const key = `${caseId}:${hash}:${options.cachedOnly ? 'cached' : 'live'}`;
+  const hash = versionHashFor(caseId, instantJson, sourceUrl, engine);
+  const key = `${caseId}:${hash}:${engine}:${options.cachedOnly ? 'cached' : 'live'}`;
 
   const existing = inFlight.get(key);
   if (existing) return existing;
@@ -314,10 +355,13 @@ export function finalizeDocument(options: FinalizeOptions = {}): Promise<Generat
       sourceUrl,
       versionHash: hash,
       fieldsFilled: instantJson.formFieldValues.length,
+      engine,
     };
 
-    // 1. Fully processed document already on disk — nothing to bill.
-    const tagged = await readCached(hash, 'tagged');
+    // 1. A Nutrient-tagged document already on disk — nothing to bill.
+    //    Only the nutrient engine ever writes the 'tagged' suffix, and only
+    //    after a successful autotag, so 'processed' is the true status here.
+    const tagged = await readCached(hash, engine, 'tagged');
     if (tagged) {
       return {
         ...base,
@@ -329,42 +373,43 @@ export function finalizeDocument(options: FinalizeOptions = {}): Promise<Generat
       };
     }
 
-    // 2. Filled-but-untagged document on disk. /build has already been paid
-    //    for, so only the accessibility pass is retried.
-    const cachedFilled = await readCached(hash, 'filled');
+    // 2. Filled-but-not-yet-accessibility-stepped document on disk. The fill
+    //    has already been paid for (or computed), so only the accessibility
+    //    step is (re)run. For the local engine that step is offline and cheap
+    //    (it verifies the structure tree), so it also runs in cachedOnly mode.
+    const cachedFilled = await readCached(hash, engine, 'filled');
+    const canRunAccessibilityOffline = engine === 'local';
 
-    if (!options.cachedOnly) {
+    if (!options.cachedOnly || (cachedFilled && canRunAccessibilityOffline)) {
       try {
-        const filled =
-          cachedFilled ?? (await fillForm(await fetchSourcePdf(sourceUrl), instantJson));
-        if (!cachedFilled) await writeCached(hash, 'filled', filled);
-
-        try {
-          const bytes = await autotag(filled);
-          await writeCached(hash, 'tagged', bytes);
-          return {
-            ...base,
-            pdfBytes: bytes,
-            byteLength: bytes.byteLength,
-            accessibilityStatus: 'processed',
-            origin: cachedFilled ? 'cache' : 'live',
-            note: null,
-          };
-        } catch (error) {
-          // The filled document is real; only the accessibility pass failed.
-          // Serve it untagged and say so, in every mode.
-          return {
-            ...base,
-            pdfBytes: filled,
-            byteLength: filled.byteLength,
-            accessibilityStatus: 'failed',
-            origin: cachedFilled ? 'cache' : 'live',
-            note:
-              error instanceof NutrientError && error.status === 402
-                ? 'The Nutrient accessibility pass did not run: this account is out of processing credit.'
-                : 'The Nutrient accessibility pass did not complete for this document.',
-          };
+        let fill: FillResult | null = null;
+        let filled = cachedFilled;
+        if (!filled) {
+          fill = await fillFormDetailed(await fetchSourcePdf(sourceUrl), instantJson, engine);
+          filled = fill.pdfBytes;
+          // A fallback fill (Nutrient unavailable -> local) is not cached under
+          // the requested engine's key, so the next request retries Nutrient
+          // instead of serving local output labelled as Nutrient's.
+          if (fill.engine === engine) await writeCached(hash, engine, 'filled', filled);
         }
+        const origin = cachedFilled ? 'cache' : 'live';
+        const notesFromFill = fill ? fillNotes(engine, fill) : [];
+
+        const access = await processAccessibility(filled, engine);
+        if (access.status === 'processed' && access.engine === 'nutrient') {
+          await writeCached(hash, engine, 'tagged', access.pdfBytes);
+        }
+
+        return {
+          ...base,
+          // The engine that actually produced the bytes, after any fallback.
+          engine: fill?.engine ?? engine,
+          pdfBytes: access.pdfBytes,
+          byteLength: access.pdfBytes.byteLength,
+          accessibilityStatus: access.status,
+          origin,
+          note: joinNotes([...notesFromFill, accessibilityNote(access)]),
+        };
       } catch (error) {
         if (!DEMO_MODE) throw error;
       }
@@ -372,13 +417,14 @@ export function finalizeDocument(options: FinalizeOptions = {}): Promise<Generat
 
     // 3. Offline / cached-only path: serve what has already been produced.
     if (cachedFilled) {
+      const status: AccessibilityStatus = 'pending';
       return {
         ...base,
         pdfBytes: cachedFilled,
         byteLength: cachedFilled.byteLength,
-        accessibilityStatus: 'pending',
+        accessibilityStatus: status,
         origin: 'cache',
-        note: 'The Nutrient accessibility pass has not run on this document yet.',
+        note: 'The accessibility step has not run on this document yet.',
       };
     }
 
@@ -389,8 +435,9 @@ export function finalizeDocument(options: FinalizeOptions = {}): Promise<Generat
       );
     }
 
+    const { engine: _engine, ...fixtureBase } = base;
     return {
-      ...base,
+      ...fixtureBase,
       pdfBytes: fixture,
       byteLength: fixture.byteLength,
       accessibilityStatus: 'pending',

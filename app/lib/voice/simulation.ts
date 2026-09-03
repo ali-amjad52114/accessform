@@ -5,6 +5,10 @@
  * of events the live Vapi adapter emits, so /live cannot tell the difference.
  * It runs entirely in the browser tab: no network, no microphone, no
  * telephony — which is what makes the demo unbreakable.
+ *
+ * Demo mode is the ONE place fixtures are allowed (M1_CONTRACT §0.3/§0.5):
+ * progress, sections and completeness here come from the fixture store, and
+ * the send_summary step is recorded as `skipped` — never claimed as sent.
  */
 
 import {
@@ -15,10 +19,18 @@ import {
   DEMO_FILLED_PDF_PATH,
   DEMO_HOSPITAL,
   DEMO_PROGRAM,
+  NEED_CATEGORY_LABELS,
+  PROGRESS_STEP_LABELS,
   type Answer,
   type CaseBundle,
   type CaseEvent,
+  type CaseProgress,
+  type Delivery,
   type Id,
+  type InterviewSection,
+  type M1VoiceToolName,
+  type ProgressState,
+  type ProgressStepId,
   type StartVoiceSessionOptions,
   type VapiToolName,
   type VoiceSession,
@@ -30,7 +42,13 @@ import {
   defaultRequirements,
   READY_FOR_REVIEW_PERCENT,
 } from './case-store';
-import { formatFieldValue, resolveField, scriptedValue } from './form-plan';
+import {
+  INTERVIEW_PLAN,
+  formatFieldValue,
+  resolveField,
+  scriptedValue,
+  type InterviewField,
+} from './form-plan';
 import { SIMULATION_SCRIPT, beatDelayMs, type ScriptBeat } from './script';
 import {
   VoiceEventBus,
@@ -51,6 +69,54 @@ function envSpeedFactor(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
 }
 
+/** The interview steps that carry form fields, in asking order. */
+const FIELD_STEPS: readonly ProgressStepId[] = [
+  'personal_information',
+  'household',
+  'insurance',
+  'income',
+];
+
+/** Section label for the live form row and the activity feed. */
+export function sectionLabelForField(field: InterviewField): string {
+  return PROGRESS_STEP_LABELS[field.step];
+}
+
+/**
+ * The fixture form's sections, in the shape Xano's GET /cases/{id}/next_question
+ * returns them, so demo mode exercises the same section-driven progress UI as
+ * a live case. Only rendered once the form has been found.
+ */
+function fixtureSections(bundle: CaseBundle): InterviewSection[] {
+  const answered = new Set(
+    bundle.answers
+      .filter((answer) => String(answer.value_json ?? '').trim() !== '')
+      .map((answer) => answer.field_id),
+  );
+  let activeAssigned = false;
+  return FIELD_STEPS.map((step, index) => {
+    const fields = INTERVIEW_PLAN.filter((field) => field.step === step);
+    const answeredCount = fields.filter((field) => answered.has(field.fieldId)).length;
+    let state: ProgressState;
+    if (answeredCount >= fields.length) {
+      state = 'done';
+    } else if (!activeAssigned) {
+      state = 'active';
+      activeAssigned = true;
+    } else {
+      state = 'todo';
+    }
+    return {
+      key: step,
+      label: PROGRESS_STEP_LABELS[step],
+      order: index + 1,
+      field_count: fields.length,
+      answered_count: answeredCount,
+      state,
+    };
+  });
+}
+
 function emptyBundle(caseId: Id): CaseBundle {
   const timestamp = new Date().toISOString();
   return {
@@ -64,6 +130,11 @@ function emptyBundle(caseId: Id): CaseBundle {
       progress_percent: 0,
       created_at: timestamp,
       updated_at: timestamp,
+      need_category: 'other',
+      location: '',
+      caller_phone: '',
+      situation_text: '',
+      delivery_status: 'none',
     },
     hospital: { ...DEMO_HOSPITAL },
     program: null,
@@ -71,6 +142,7 @@ function emptyBundle(caseId: Id): CaseBundle {
     requirements: [],
     documents: [],
     events: [],
+    deliveries: [],
   };
 }
 
@@ -101,9 +173,16 @@ export function createSimulatedVoiceAdapter(
     emit({ kind: 'state', state: next });
   };
 
+  const currentProgress = (): CaseProgress => {
+    const progress = computeProgress(bundle);
+    if (bundle.program) progress.sections = fixtureSections(bundle);
+    return progress;
+  };
+
   const emitProgress = () => {
-    bundle.case.progress_percent = computeProgress(bundle).percent;
-    emit({ kind: 'progress', progress: computeProgress(bundle) });
+    const progress = currentProgress();
+    bundle.case.progress_percent = progress.percent;
+    emit({ kind: 'progress', progress });
   };
 
   const pushEvent = (
@@ -147,6 +226,7 @@ export function createSimulatedVoiceAdapter(
     }
 
     const displayValue = formatFieldValue(field, value);
+    const sectionLabel = sectionLabelForField(field);
     emit({
       kind: 'form_state',
       formState: {
@@ -158,33 +238,42 @@ export function createSimulatedVoiceAdapter(
         savedAt: answer.updated_at,
       },
     });
-    pushEvent(
-      'xano',
-      'answer_saved',
-      field.step === 'household'
-        ? 'Household answer saved'
-        : field.step === 'income'
-          ? 'Income answer saved'
-          : field.step === 'insurance'
-            ? 'Insurance answer saved'
-            : 'Personal detail saved',
-      { field_id: field.fieldId, normalized_key: field.normalizedKey, display_value: displayValue },
-    );
+    pushEvent('xano', 'answer_saved', `${sectionLabel} answer saved`, {
+      field_id: field.fieldId,
+      normalized_key: field.normalizedKey,
+      section: field.step,
+      section_label: sectionLabel,
+    });
     emitProgress();
   };
 
-  const applyToolEffect = (name: VapiToolName) => {
+  const applyToolEffect = (name: M1VoiceToolName, args: Record<string, unknown>) => {
     switch (name) {
       case 'create_case': {
         bundle.case.status = 'DISCOVERING';
-        pushEvent('xano', 'case_created', 'Case created', {
-          case_id: caseId,
-          bill_amount: bundle.case.bill_amount,
-        });
+        bundle.case.situation_text = typeof args.situation_text === 'string' ? args.situation_text : '';
+        bundle.case.location = typeof args.location === 'string' ? args.location : '';
+        pushEvent('xano', 'case_created', 'Case created', { case_id: caseId });
+        break;
+      }
+      case 'resolve_need': {
+        bundle.case.need_category = 'hospital_financial_assistance';
+        pushEvent(
+          'voice_agent',
+          'need_resolved',
+          `Need understood: ${NEED_CATEGORY_LABELS.hospital_financial_assistance}`,
+          { category: 'hospital_financial_assistance', confidence: 0.95 },
+        );
         break;
       }
       case 'discover_program': {
-        bundle.program = { ...DEMO_PROGRAM };
+        bundle.program = {
+          ...DEMO_PROGRAM,
+          category: 'hospital_financial_assistance',
+          form_kind: 'fillable_pdf',
+          field_count: CEDARS_APPLICATION_FIELD_COUNT,
+          region: 'Los Angeles, CA',
+        };
         bundle.case.program_id = DEMO_PROGRAM.id;
         bundle.case.status = 'FORM_FOUND';
         bundle.documents = [
@@ -199,16 +288,25 @@ export function createSimulatedVoiceAdapter(
             version_hash: null,
           },
         ];
-        pushEvent('serpapi', 'program_discovered', 'Official Cedars program found', {
+        pushEvent('serpapi', 'program_discovered', `Official ${DEMO_HOSPITAL.name} program found`, {
           policy_url: CEDARS_POLICY_URL,
+          program_name: DEMO_PROGRAM.name,
+          organization_name: DEMO_HOSPITAL.name,
+          form_kind: 'fillable_pdf',
+          from_catalog: true,
         });
-        pushEvent('serpapi', 'source_verified', 'HCAI source verified', {
+        pushEvent('serpapi', 'source_verified', 'Official source verified (hcai.ca.gov)', {
           source_domain: 'hcai.ca.gov',
           application_url: CEDARS_APPLICATION_PDF_URL,
         });
-        pushEvent('nutrient', 'form_extracted', 'Form structure extracted', {
+        pushEvent('xano', 'form_extracted', 'Form fields read from the official PDF', {
           fields: CEDARS_APPLICATION_FIELD_COUNT,
         });
+        break;
+      }
+      case 'get_next_question':
+      case 'get_case_progress': {
+        /* Read-only on the system of record: progress is re-emitted after every tool. */
         break;
       }
       case 'validate_case': {
@@ -237,7 +335,7 @@ export function createSimulatedVoiceAdapter(
         ];
         bundle.case.status = 'READY_FOR_REVIEW';
         bundle.case.progress_percent = READY_FOR_REVIEW_PERCENT;
-        pushEvent('nutrient', 'document_generated', 'Completed PDF generated', {
+        pushEvent('nutrient', 'document_generated', 'Filled PDF generated', {
           fields_filled: bundle.answers.length,
         });
         pushEvent('nutrient', 'accessibility_processed', 'Accessibility processing complete', {
@@ -246,8 +344,28 @@ export function createSimulatedVoiceAdapter(
         emit({ kind: 'completeness', summary: computeCompleteness(bundle) });
         break;
       }
+      case 'send_summary': {
+        /* Demo mode never calls Twilio: the row is `skipped`, and the feed says so. */
+        const delivery: Delivery = {
+          id: nextId('dlv'),
+          case_id: caseId,
+          channel: 'sms',
+          to: '',
+          message: '',
+          document_url: `/review?case=${encodeURIComponent(caseId)}`,
+          status: 'skipped',
+          provider_id: '',
+          error: 'demo mode: no text is sent',
+          created_at: new Date().toISOString(),
+        };
+        bundle.deliveries = [...(bundle.deliveries ?? []), delivery];
+        pushEvent('xano', 'summary_failed', 'Text summary skipped (demo run, nothing sent)', {
+          delivery_id: delivery.id,
+          status: delivery.status,
+        });
+        break;
+      }
       case 'save_answer':
-      case 'get_case_progress':
         break;
     }
   };
@@ -274,9 +392,11 @@ export function createSimulatedVoiceAdapter(
         break;
       case 'tool': {
         const callId = nextId('call');
-        emit({ kind: 'tool_call', call: { id: callId, name: beat.name, args: beat.args } });
-        applyToolEffect(beat.name);
-        emit({ kind: 'tool_result', callId, name: beat.name, ok: true });
+        /* VoiceToolCall.name is the legacy closed union; widened at this boundary (M1_CONTRACT §4). */
+        const name = beat.name as VapiToolName;
+        emit({ kind: 'tool_call', call: { id: callId, name, args: beat.args } });
+        applyToolEffect(beat.name, beat.args);
+        emit({ kind: 'tool_result', callId, name, ok: true });
         emitProgress();
         break;
       }

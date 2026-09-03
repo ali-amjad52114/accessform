@@ -9,6 +9,7 @@
  */
 
 import { NextResponse } from 'next/server';
+import { ensureVoiceAdaptersRegistered } from '../../../../lib/adapters/register-voice';
 import { runVoiceTool } from '../../../../lib/voice/tool-handlers';
 import { parseVapiServerMessage, toolResponse } from '../../../../lib/voice/vapi-messages';
 import { getXanoAdapter } from '../../../../lib/voice/xano-bridge';
@@ -22,6 +23,18 @@ function secretRejected(request: Request): boolean {
   const provided =
     request.headers.get('x-vapi-secret') ?? request.headers.get('x-vapi-signature') ?? '';
   return provided !== expected;
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+}
+
+/** Same rule as /api/voice/tools: the call's customer number, phone calls only. */
+function callerPhoneOf(raw: Record<string, unknown>): string | null {
+  const call = record(raw.call);
+  const customer = record(call.customer ?? raw.customer);
+  const number = customer.number;
+  return typeof number === 'string' && number.trim() ? number.trim() : null;
 }
 
 async function recordLifecycle(caseId: string, type: string, raw: Record<string, unknown>) {
@@ -74,12 +87,17 @@ export async function POST(request: Request): Promise<Response> {
   const message = parseVapiServerMessage(body);
 
   if (message.toolCalls.length > 0) {
+    // finalize_document must run through the document engine, not the fixture.
+    ensureVoiceAdaptersRegistered();
+    const callerPhone = callerPhoneOf(message.raw);
     const results = await Promise.all(
       message.toolCalls.map(async (call) => {
-        const args =
-          message.caseId && typeof call.args === 'object' && call.args
-            ? { case_id: message.caseId, ...(call.args as Record<string, unknown>) }
-            : call.args;
+        const given = typeof call.args === 'object' && call.args ? (call.args as Record<string, unknown>) : {};
+        const args: Record<string, unknown> = {
+          ...(message.caseId ? { case_id: message.caseId } : {}),
+          ...(callerPhone ? { caller_phone: callerPhone } : {}),
+          ...given,
+        };
         const outcome = await runVoiceTool(call.name, args);
         return { toolCallId: call.id, result: outcome.result };
       }),

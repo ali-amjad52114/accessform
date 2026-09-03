@@ -1,15 +1,8 @@
-// GET /programs/{id}/fields - the normalized form schema for a program, in the
-// order the interview asks for it. Backs XanoAdapter.getFormSchema.
-//
-// Two consumers: the voice agent reads `conversational_prompt` so it never
-// reads a raw PDF label aloud, and the Nutrient step reads
-// `pdf_mapping.acroform_field` to build Instant JSON.
-//
-// Defaults to the 26 fields the interview actually collects. Pass
-// required_only=false for all 101 AcroForm fields on the official PDF.
+// GET /programs/{id}/fields - alias of GET /programs/{id}/form_schema, kept
+// for the pre-M1 callers. Same stack, same response shape.
 query "programs/{id}/fields" verb=GET {
   api_group = "AccessForm"
-  description = "Normalized form schema for a program, in ask order."
+  description = "Alias of /programs/{id}/form_schema: normalized form schema for a program, in ask order."
 
   input {
     int id
@@ -27,29 +20,16 @@ query "programs/{id}/fields" verb=GET {
       error = "No program found with that id."
     }
 
-    conditional {
-      if ($input.required_only) {
-        db.query form_schema {
-          where = $db.form_schema.program_id == $input.id && $db.form_schema.required == true
-          sort = {id: "asc"}
-          return = {type: "list"}
-        } as $required_rows
-        var $fields { value = $required_rows }
-      }
-      else {
-        db.query form_schema {
-          where = $db.form_schema.program_id == $input.id
-          sort = {id: "asc"}
-          return = {type: "list"}
-        } as $all_rows
-        var $fields { value = $all_rows }
-      }
-    }
+    function.run "form_schema_rows" {
+      input = {program_id: $program.id, required_only: $input.required_only}
+    } as $fields
   }
 
   response = {
     program_id     : $program.id
     application_url: $program.application_url
+    sha256         : ($program.sha256 ?? "")
+    form_kind      : $program.form_kind
     count          : ($fields|count)
     fields         : $fields
   }
