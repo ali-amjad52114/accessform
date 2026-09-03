@@ -35,7 +35,7 @@ import { humanizeRequirementLabel } from '../interview/labels';
 import { fetchSourcePdf, finalizeDocument } from '../../app/api/document/_lib/generate';
 import { loadCaseInputs } from '../../app/api/document/_lib/case-inputs';
 import { buildPublicDocumentUrl } from '../../app/api/document/_lib/public-url';
-import { createDelivery } from './deliveries';
+import { createDelivery, wouldBeDelivery } from './deliveries';
 
 /* ------------------------------------------------------------------ */
 /* Provider                                                            */
@@ -378,6 +378,11 @@ export async function approveAndSend(input: ApproveAndSendInput): Promise<Approv
 
   /** Write the deliveries row; fall back to an event when Xano rejects it (enum not pushed yet). */
   const record = async (status: DeliveryStatus, extra: { provider_id?: string; error?: string }) => {
+    // Xano's POST /cases/{id}/deliveries requires `to`; with no destination
+    // there is no row worth writing — the outcome event carries the reason.
+    if (!destination) {
+      return { delivery: wouldBeDelivery(caseId, { ...base, status, ...extra }), persisted: false, error: '' };
+    }
     const write = await createDelivery(caseId, { ...base, status, ...extra });
     if (!write.persisted) {
       await appendEvent(

@@ -16,7 +16,7 @@ query "cases/{id}/deliveries" verb=POST {
     text id filters=trim
 
     enum channel?="sms" {
-      values = ["sms"]
+      values = ["sms", "email"]
     }
 
     text to filters=trim
