@@ -5,10 +5,17 @@ npm install
 npm run dev
 ```
 
-Routes:
-- `/`
-- `/live`
-- `/review`
+Pages:
+- `/` — start: headline, phone number, **Start a conversation**
+- `/c/<case-id>` — the conversation page: history sidebar (this browser only, `localStorage`) plus the transcript with inline cards (location, search, form, still missing, result)
+- `/live`, `/review?case=<id>` — kept until `/c/<case-id>` replaces them, then they redirect
+
+API:
+- `POST /api/cases` — create a case from the browser
+- `GET /api/cases/summary?ids=<id,id,...>` — summaries for the history sidebar
+- `GET /api/document/:caseId` — the filled PDF; token-gated (72 h HMAC link) when `PUBLIC_BASE_URL` is set
+- `GET /api/document/:caseId/status` — engine and accessibility status
+- `POST /api/voice/tools`, `POST /api/voice/webhook` — Vapi tool calls and call events
 
 ## Document engine
 
