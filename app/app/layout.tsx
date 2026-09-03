@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
 export const metadata: Metadata = {
   title: 'AccessForm',
   description:
-    'AccessForm turns a hospital financial-assistance application into a conversation, for people who cannot read the paperwork.',
+    'AccessForm finds the official program for your situation, turns its form into a conversation, fills the real document, and texts you what is still missing.',
 };
 
 /**

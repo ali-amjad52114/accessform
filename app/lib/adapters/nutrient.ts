@@ -49,6 +49,7 @@ import {
   type TaggedDocument,
   type XanoAdapter,
 } from '../contract';
+import { buildPublicDocumentUrl } from '../../app/api/document/_lib/public-url';
 import {
   fillAndFlatten,
   processAccessibility,
@@ -621,7 +622,7 @@ export class LiveNutrientAdapter implements NutrientAdapter {
     // back to the bundled fixture, and it regenerates byte-identical output
     // from the same answers with the same engine. The file on disk is the
     // immutable artifact recorded on the Xano row whenever it could be written.
-    const documentUrl = `/api/document/${encodeURIComponent(input.case_id)}`;
+    const documentUrl = buildPublicDocumentUrl(input.case_id).url;
     const generatedUrl = writtenPath ?? documentUrl;
 
     const document = await this.xano.saveDocument(input.case_id, {

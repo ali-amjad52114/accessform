@@ -24,7 +24,7 @@ import {
   type CaseEvent,
   type Id,
   type StartVoiceSessionOptions,
-  type VapiToolName,
+  type M1VoiceToolName,
   type VoiceSession,
   type VoiceState,
 } from '../contract';
@@ -235,7 +235,7 @@ export function createVapiWebAdapter(options: VapiWebOptions): AccessFormVoiceAd
           args = record(rawArgs);
         }
         if (typeof args.case_id === 'string' && args.case_id) caseId = args.case_id;
-        const toolName = name as VapiToolName;
+        const toolName = name as M1VoiceToolName;
         emit({ kind: 'tool_call', call: { id: callId, name: toolName, args } });
         emit({ kind: 'tool_result', callId, name: toolName, ok: true });
         if (name === 'save_answer') saves.push(args);

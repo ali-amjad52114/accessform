@@ -323,6 +323,8 @@ export interface FinalizeOptions {
   cachedOnly?: boolean;
   /** Override `DOCUMENT_ENGINE` for this call. */
   engine?: DocumentEngine;
+  /** Pre-mapped values (comb-expanded, schema-validated). Wins over `answers`. */
+  instantJson?: InstantJson;
 }
 
 /**
@@ -335,7 +337,7 @@ export function finalizeDocument(options: FinalizeOptions = {}): Promise<Generat
   const answers = options.answers ?? DEMO_ANSWERS;
   const sourceUrl = options.sourceUrl ?? CEDARS_APPLICATION_PDF_URL;
   const engine = options.engine ?? resolveEngine();
-  const instantJson = buildInstantJson(answers);
+  const instantJson = options.instantJson ?? buildInstantJson(answers);
   const hash = versionHashFor(caseId, instantJson, sourceUrl, engine);
   const key = `${caseId}:${hash}:${engine}:${options.cachedOnly ? 'cached' : 'live'}`;
 

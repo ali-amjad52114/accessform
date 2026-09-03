@@ -20,6 +20,7 @@
  * the final Delivery. A `skipped`/`failed` delivery is never reported as sent.
  */
 
+import { humanizeRequirementLabel } from '../interview/labels';
 import { isDemoMode } from '../adapters/env';
 import {
   SMS_MAX_CHARS,
@@ -90,7 +91,7 @@ function missingLabels(missing: readonly Requirement[]): string[] {
   const labels: string[] = [];
   for (const r of missing) {
     if (r.status !== 'missing') continue;
-    const label = oneLine(r.label);
+    const label = oneLine(humanizeRequirementLabel(r.label));
     if (!label || seen.has(label)) continue;
     seen.add(label);
     labels.push(label);

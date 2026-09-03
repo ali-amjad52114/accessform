@@ -26,6 +26,7 @@ import {
 } from '../../lib/contract';
 import { getXanoAdapter, isDemoMode } from '../../lib/adapters';
 import { describeDocument } from '../api/document/_lib/generate';
+import { signedDocumentPath } from '../api/document/_lib/public-url';
 import type { GeneratedDocument } from '../api/document/_lib/types';
 
 import { notSubmittedCopy } from '../../components/safe-copy';
@@ -99,7 +100,7 @@ export default async function ReviewPage({ searchParams }: ReviewPageProps) {
   const programName = bundle.program?.name ?? 'the official form';
   const organization = organizationName(bundle);
   const deliveries: Delivery[] = bundle.deliveries ?? [];
-  const documentUrl = `/api/document/${encodeURIComponent(caseId)}`;
+  const documentUrl = signedDocumentPath(caseId);
   const subtitle = organization ? `${programName} · ${organization}` : programName;
 
   /* Cached-only so the first paint is instant and never blocked on the engine.

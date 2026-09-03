@@ -31,6 +31,7 @@ export async function GET(
       caseId: inputs.caseId,
       answers: inputs.answers,
       sourceUrl: inputs.sourceUrl,
+      instantJson: inputs.instantJson,
       cachedOnly,
     });
     return NextResponse.json(doc, { headers: { 'Cache-Control': 'no-store' } });

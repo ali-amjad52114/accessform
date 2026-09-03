@@ -10,16 +10,20 @@ import { NextResponse } from 'next/server';
 
 import { DEMO_CASE_ID } from '../../../../lib/contract';
 import { loadCaseInputs } from '../_lib/case-inputs';
+import { requireDocumentToken } from '../_lib/public-url';
 import { finalizeDocument } from '../_lib/generate';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ caseId: string }> },
 ): Promise<Response> {
   const { caseId } = await params;
+
+  const denied = requireDocumentToken(request, caseId || DEMO_CASE_ID);
+  if (denied) return denied;
 
   try {
     const inputs = await loadCaseInputs(caseId || DEMO_CASE_ID);
@@ -27,6 +31,7 @@ export async function GET(
       caseId: inputs.caseId,
       answers: inputs.answers,
       sourceUrl: inputs.sourceUrl,
+      instantJson: inputs.instantJson,
     });
 
     const body = new Uint8Array(doc.pdfBytes.byteLength);

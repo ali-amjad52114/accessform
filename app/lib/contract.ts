@@ -28,6 +28,7 @@
  * `import { ... } from '@/lib/contract'` (or '../contract') keeps being the
  * single import path. Type-only imports below break the cycle at compile time.
  */
+import type { M1VoiceToolName } from './m1/contract';
 export * from './m1/contract';
 
 import type {
@@ -760,7 +761,8 @@ export interface TranscriptTurn {
 
 export interface VoiceToolCall {
   id: string;
-  name: VapiToolName;
+  /** Any M1 tool name (superset of the legacy six). */
+  name: M1VoiceToolName;
   args: Record<string, unknown>;
 }
 
@@ -768,7 +770,7 @@ export type VoiceEvent =
   | { kind: 'state'; state: VoiceState }
   | { kind: 'transcript'; turn: TranscriptTurn }
   | { kind: 'tool_call'; call: VoiceToolCall }
-  | { kind: 'tool_result'; callId: string; name: VapiToolName; ok: boolean }
+  | { kind: 'tool_result'; callId: string; name: M1VoiceToolName; ok: boolean }
   | { kind: 'case_event'; event: CaseEvent }
   | { kind: 'error'; message: string };
 

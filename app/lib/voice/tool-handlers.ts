@@ -72,10 +72,12 @@ import {
   type ValidateCaseToolInput,
   type ValidateCaseToolResult,
 } from '../contract';
+import { buildPublicDocumentUrl, signedDocumentPath } from '../../app/api/document/_lib/public-url';
 import { sendSummary } from '../delivery/sms';
 import { resolveProgram } from '../discovery/resolve-program';
 import { mapAnswers } from '../forms/map-answers';
 import { understandForm } from '../forms/understand-form';
+import { humanizeRequirementLabel } from '../interview/labels';
 import { nextQuestion } from '../interview/next-question';
 import { resolveNeed } from '../need/resolve-need';
 import { getNutrientAdapter } from './adapter-registry';
@@ -769,7 +771,7 @@ export const voiceToolHandlers: M1VoiceToolHandlers = {
       appears_complete: summary.readyForReview,
       required_fields_complete: summary.requiredFieldsComplete,
       required_fields_total: summary.requiredFieldsTotal,
-      still_required: summary.missingRequirements.map((req) => req.label),
+      still_required: summary.missingRequirements.map((req) => humanizeRequirementLabel(req.label)),
       basis: SAFE_COPY.completenessBasis,
       disclaimer: COPY.disclaimer(organizationName(bundle)),
     };
@@ -800,7 +802,16 @@ export const voiceToolHandlers: M1VoiceToolHandlers = {
       // M1 path: schema + answers -> mapAnswers -> Instant JSON -> engine.
       let instantJson: InstantJson | null = null;
       try {
-        const schema = await loadFormSchema(program.id);
+        // The interview uses Xano's asked-rows subset, but filling needs the
+        // COMPLETE schema (comb boxes, followers) so names spread across
+        // character boxes. understandForm is idempotent and cache-backed.
+        let schema = await loadFormSchema(program.id);
+        try {
+          const full = await understandForm({ program_id: program.id, pdf_url: sourceUrl });
+          if (full.length > schema.length) schema = full;
+        } catch (error) {
+          console.warn('[voice] full schema unavailable, mapping with the interview subset:', (error as Error).message);
+        }
         if (schema.length > 0 && bundle.answers.length > 0) {
           const mapped = await mapAnswers({ schema, answers: bundle.answers });
           unmapped = mapped.unmapped;
@@ -828,7 +839,7 @@ export const voiceToolHandlers: M1VoiceToolHandlers = {
         const versionHash = sha256Hex(tagged.pdfBytes);
         const fileName = `case-${encodeURIComponent(args.case_id)}-${versionHash.slice(0, 12)}.pdf`;
         const writtenPath = await writeGeneratedFile(fileName, tagged.pdfBytes);
-        const documentUrl = `/api/document/${encodeURIComponent(args.case_id)}`;
+        const documentUrl = signedDocumentPath(args.case_id);
         const document = await xano.saveDocument(args.case_id, {
           type: 'filled_application',
           source_url: sourceUrl,
@@ -907,10 +918,10 @@ export const voiceToolHandlers: M1VoiceToolHandlers = {
 
     const summary = await xano.validateCase(args.case_id);
     return {
-      document_url: absoluteUrl(finalized.documentUrl),
+      document_url: buildPublicDocumentUrl(args.case_id).url,
       fields_filled: finalized.fieldsFilled,
       accessibility_status: finalized.accessibilityStatus,
-      still_required: summary.missingRequirements.map((req) => req.label),
+      still_required: summary.missingRequirements.map((req) => humanizeRequirementLabel(req.label)),
       note: COPY.notSubmitted,
     };
   },
@@ -930,7 +941,7 @@ export const voiceToolHandlers: M1VoiceToolHandlers = {
     const hasFilledDocument = bundle.documents.some((doc) => doc.type === 'filled_application');
     let documentUrl: string | null = null;
     if (formKind === 'fillable_pdf' && hasFilledDocument) {
-      documentUrl = absoluteUrl(`/api/document/${encodeURIComponent(args.case_id)}`);
+      documentUrl = buildPublicDocumentUrl(args.case_id).url;
     } else if (formKind !== 'fillable_pdf' && program?.application_url) {
       documentUrl = program.application_url;
     }

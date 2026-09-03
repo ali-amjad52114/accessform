@@ -75,7 +75,7 @@
     "region": "Napa, CA",
     "kind": "college",
     "program": "DSPS Student Application",
-    "application_url": "(from napavalley.edu DSPS page)",
+    "application_url": "https://www.napavalley.edu/student-services-and-resources/disability-support-programs-and-services/documents/DSPS_Application_for_Services_FILLABLE_07.2020.pdf",
     "policy_url": "https://www.napavalley.edu/student-services-and-resources/disability-support-programs-and-services",
     "source_domain": "napavalley.edu",
     "local_file": "spike/college_dsps_napavalley.pdf",

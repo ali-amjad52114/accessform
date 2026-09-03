@@ -55,7 +55,7 @@ export const SCRIPTED_LOCATION = 'Los Angeles, CA';
 
 /** The line the assistant opens with, on the phone and in the browser. Need-agnostic. */
 export const FIRST_MESSAGE =
-  'This is AccessForm. Tell me what is going on — a bill you cannot pay, a ride you need, help at school, a form someone sent you — and where you are. I will find the official program for it and help you fill in its form by voice. Take your time.';
+  "This is AccessForm. I help people find the official form for their situation and fill it in by voice. Take your time \u2014 what's going on?";
 
 export const SIMULATION_SCRIPT: readonly ScriptBeat[] = [
   { kind: 'state', state: 'speaking' },
