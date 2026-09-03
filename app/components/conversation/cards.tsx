@@ -361,7 +361,7 @@ function FallbackFormBody({
       ) : (
         groups.map(([section, entries]) => (
           <div className="af-cv-sec" key={section || '__answers'}>
-            <h3>{section || 'Answers so far'}</h3>
+            <h3>{section ? humanizeFieldId(section) : 'Answers so far'}</h3>
             <div className="af-cv-fields">
               {entries.map(([fieldId, value]) => (
                 <FieldTile key={fieldId} label={value.label ?? humanizeFieldId(fieldId)} value={value} />
