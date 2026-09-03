@@ -72,8 +72,8 @@ interface SerpSearchResponse {
   organic_results?: SerpOrganicResult[];
 }
 
-/** One `local_results` entry of the SerpApi `google_maps` engine. */
-interface SerpMapsLocalResult {
+/** One `local_results` entry of the SerpApi `google_maps` engine, as received. */
+export interface SerpMapsLocalResult {
   title?: string;
   address?: string;
   gps_coordinates?: { latitude?: number; longitude?: number };

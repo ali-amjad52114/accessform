@@ -1,0 +1,186 @@
+/*
+ * MapCard — nearby organizations.
+ *
+ * Class names carry the `af-` product prefix (camelCased so CSS-module dot
+ * access stays readable: `styles.afCard`). Type never drops below 18px, every
+ * interactive element has a visible focus ring, and nothing moves for a reader
+ * who asked for reduced motion.
+ */
+
+.afCard {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  padding: 20px;
+  background: #ffffff;
+  border: 1px solid #c7c2ba;
+  border-radius: 16px;
+  color: #201e1b;
+  font-size: 18px;
+  line-height: 1.5;
+}
+
+.afHeading {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.afSubheading {
+  margin: 0;
+  font-size: 18px;
+  color: #56534f;
+}
+
+.afBody {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+  min-width: 0;
+}
+
+/* Map beside the list once there is room for both. */
+@media (min-width: 720px) {
+  .afBodyWithMap {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.afMap {
+  height: 320px;
+  min-height: 320px;
+  border: 1px solid #c7c2ba;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #eceae6;
+}
+
+/* Leaflet paints its own controls; keep them off the rounded corners. */
+.afMap :global(.leaflet-container) {
+  height: 100%;
+  width: 100%;
+  font: inherit;
+  background: #eceae6;
+}
+
+.afPin {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid #ffffff;
+  background: #2f6b5f;
+  color: #ffffff;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+.afPinSelected {
+  background: #8a3b12;
+}
+
+.afList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  counter-reset: none;
+  min-width: 0;
+}
+
+.afItem {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 12px;
+  border: 1px solid #d9d5cf;
+  border-radius: 12px;
+  background: #fbfaf8;
+}
+
+.afItemSelected {
+  border-color: #8a3b12;
+  border-width: 2px;
+  padding: 11px;
+  background: #fdf3ec;
+}
+
+.afNumber {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #2f6b5f;
+  color: #ffffff;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.afItemSelected .afNumber {
+  background: #8a3b12;
+}
+
+.afName {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.afAddress,
+.afDistance {
+  margin: 4px 0 0;
+  font-size: 18px;
+  color: #46433f;
+}
+
+.afSelectedTag {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 18px;
+  font-weight: 600;
+  color: #8a3b12;
+}
+
+.afLink {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 18px;
+  color: #1f5148;
+}
+
+.afLink:focus-visible,
+.afCard :focus-visible {
+  outline: 3px solid #2f6b5f;
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+.afEmpty {
+  margin: 0;
+  font-size: 18px;
+  color: #56534f;
+}
+
+.afNote {
+  margin: 0;
+  font-size: 18px;
+  color: #56534f;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .afCard *,
+  .afMap :global(.leaflet-container) * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
