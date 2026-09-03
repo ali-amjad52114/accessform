@@ -22,6 +22,7 @@ import {
 } from '../../lib/contract';
 import type { NeedCategory } from '../../lib/m1/contract';
 import { eligibilityCopy, notSubmittedCopy } from '../safe-copy';
+import { ApproveAndSend } from './ApproveAndSend';
 import { documentHref } from './DocumentsStrip';
 import {
   filledValues,
@@ -472,8 +473,18 @@ export function ResultCard({
     typeof event.metadata_json?.fields_filled === 'number' ? event.metadata_json.fields_filled : null;
   const accessibility = filledDoc ? ACCESSIBILITY_WORD[filledDoc.accessibility_status] : null;
 
-  const deliveries = bundle?.deliveries ?? [];
+  const allDeliveries = bundle?.deliveries ?? [];
+  const deliveries = allDeliveries.filter((d) => d.channel !== 'email');
+  const emailDeliveries = allDeliveries.filter((d) => d.channel === 'email');
   const latest = deliveries.length > 0 ? deliveries[deliveries.length - 1] : null;
+  const approve = (
+    <ApproveAndSend
+      caseId={caseId}
+      emailDeliveries={emailDeliveries}
+      organization={organization}
+      disabled={!filledDoc && bundle?.program?.form_kind !== 'flat_pdf'}
+    />
+  );
 
   let texted: ReactNode;
   if (!latest) {
@@ -529,6 +540,7 @@ export function ResultCard({
             <span>{notSubmittedCopy(organization)}</span>
           </div>
         </div>
+        {approve}
       </CardShell>
     );
   }
@@ -599,6 +611,7 @@ export function ResultCard({
           </div>
         </div>
       </div>
+      {approve}
       <p className="af-cv-disc">{SAFE_COPY.completenessBasis} {eligibilityCopy(organization)}</p>
     </CardShell>
   );
