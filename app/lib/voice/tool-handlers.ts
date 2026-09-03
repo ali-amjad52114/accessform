@@ -48,6 +48,7 @@ import {
   type DiscoverProgramToolResult,
   type FinalizeDocumentToolInput,
   type FinalizeDocumentToolResult,
+  type FindNearbyOrganizationsToolResult,
   type FinalizedDocument,
   type FormSchemaField,
   type GetNextQuestionToolInput,
@@ -74,6 +75,7 @@ import {
 } from '../contract';
 import { buildPublicDocumentUrl, signedDocumentPath } from '../../app/api/document/_lib/public-url';
 import { sendSummary } from '../delivery/sms';
+import { findNearbyOrganizations } from '../discovery/nearby';
 import { resolveProgram } from '../discovery/resolve-program';
 import { mapAnswers } from '../forms/map-answers';
 import { understandForm } from '../forms/understand-form';
@@ -105,6 +107,13 @@ const COPY = {
     'Tell the caller plainly that you could not verify an official form for that organization or place, ' +
     'so you cannot fill one for them yet. Do NOT continue the interview and do NOT call save_answer, ' +
     'validate_case or finalize_document for this case. Offer to note their situation and end the call.',
+  nearbyFoundNote:
+    'These are places nearby, NOT verified programs. Read the list out as numbers — "one, ...; two, ...", ' +
+    'with the name and roughly how far apart they are — and ask the caller which one they mean. ' +
+    'Then call discover_program with the exact name they picked. Never pick one for them.',
+  nearbyNoneNote:
+    'You could not list any places nearby. Say so plainly and ask the caller for the name of the organization ' +
+    'instead. Do not guess one, and do not call discover_program until they name one.',
   clarifyNote:
     'You are not sure what the caller needs yet. Ask the clarifying question, listen, then call resolve_need again ' +
     'with everything the caller has said so far.',
@@ -1045,6 +1054,51 @@ export async function runVoiceTool(name: string, rawArgs: unknown): Promise<Tool
               'Then call discover_program with this category, the organization they named (if any) and their answer as the location.'
             : COPY.resolvedNote;
         return { ok: true, result: { ...resolved, note } };
+      }
+
+      case 'find_nearby_organizations': {
+        const caseId = needCaseId(args, 'find_nearby_organizations');
+        const category = args.category;
+        if (!isNeedCategory(category)) {
+          return {
+            ok: false,
+            result: { error: 'find_nearby_organizations needs the category returned by resolve_need. Call resolve_need first.' },
+          };
+        }
+        const location = readString(args, 'location');
+        if (!location) {
+          return {
+            ok: false,
+            result: { error: 'I need to know where the caller is before I can look for places nearby. Ask "where are you right now?" — a city or ZIP is enough.' },
+          };
+        }
+        const nearby = await findNearbyOrganizations({ case_id: caseId, category, location });
+        if (!nearby.found) {
+          return {
+            ok: true,
+            result: {
+              found: false,
+              count: 0,
+              organizations: [],
+              reason: nearby.reason,
+              note: COPY.nearbyNoneNote,
+            } satisfies FindNearbyOrganizationsToolResult,
+          };
+        }
+        return {
+          ok: true,
+          result: {
+            found: true,
+            count: nearby.count,
+            organizations: nearby.organizations.map((organization) => ({
+              index: organization.index,
+              name: organization.name,
+              address: organization.address,
+              distance_miles: organization.distance_miles,
+            })),
+            note: COPY.nearbyFoundNote,
+          } satisfies FindNearbyOrganizationsToolResult,
+        };
       }
 
       case 'discover_program': {

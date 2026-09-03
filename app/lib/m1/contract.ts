@@ -354,6 +354,7 @@ export interface MappedAnswers {
 export const M1_VOICE_TOOL_NAMES = [
   'create_case',
   'resolve_need',
+  'find_nearby_organizations',
   'discover_program',
   'get_next_question',
   'save_answer',
@@ -382,6 +383,13 @@ export interface CreateCaseToolInput {
 export interface ResolveNeedToolInput {
   case_id: Id;
   situation_text: string;
+}
+
+export interface FindNearbyOrganizationsToolInput {
+  case_id: Id;
+  category: NeedCategory;
+  /** Where the caller is: city, county or ZIP. Required — the lookup is local. */
+  location: string;
 }
 
 export interface DiscoverProgramToolInput {
@@ -434,6 +442,37 @@ export interface ResolveNeedToolResult extends NeedResolution {
   case_id: Id;
   /** Spoken label for the category. */
   category_label: string;
+}
+
+/** One line of the numbered list the agent reads to the caller. */
+export interface NearbyOrganizationSummary {
+  /** 1-based. The caller picks by this number. */
+  index: number;
+  name: string;
+  address: string;
+  /**
+   * Straight-line miles from the FIRST place in the list, not a travel
+   * distance, and not measured from the caller (we only know their town).
+   * `null` when the place has no coordinates.
+   */
+  distance_miles: number | null;
+}
+
+/**
+ * Output of the find_nearby_organizations tool.
+ *
+ * This is a LOCATOR result. Nothing here is verified: it says these places
+ * exist nearby, never that any of them publishes a program or a form. Only
+ * discover_program can do that.
+ */
+export interface FindNearbyOrganizationsToolResult {
+  found: boolean;
+  count: number;
+  organizations: NearbyOrganizationSummary[];
+  /** Present when found=false — a sentence the agent can say aloud. */
+  reason?: string;
+  /** Instruction to the agent: read the numbers, let them pick, then discover. */
+  note: string;
 }
 
 export interface DiscoverProgramToolResult {
@@ -495,7 +534,13 @@ export interface SendSummaryToolResult {
   note: string;
 }
 
-/** Server-side handlers keyed by exact tool name. */
+/**
+ * Server-side handlers keyed by exact tool name.
+ *
+ * `find_nearby_organizations` is deliberately absent: it needs no case state
+ * of its own, so `runVoiceTool` calls `findNearbyOrganizations()`
+ * (lib/discovery/nearby.ts) directly instead of going through this table.
+ */
 export interface M1VoiceToolHandlers {
   create_case(args: CreateCaseToolInput): Promise<CreateCaseToolResult>;
   resolve_need(args: ResolveNeedToolInput): Promise<ResolveNeedToolResult>;
@@ -574,6 +619,29 @@ export const M1_VOICE_TOOL_SCHEMAS: Readonly<Record<M1VoiceToolName, ToolJsonSch
         },
       },
       required: ['case_id', 'situation_text'],
+    },
+  },
+  find_nearby_organizations: {
+    name: 'find_nearby_organizations',
+    description:
+      'List up to five organizations of the right kind near the caller, so they can choose one by number. ' +
+      'Use it only when the caller has NOT named an organization and the need requires one. ' +
+      'These are places nearby, not verified programs — call discover_program with the name they pick.',
+    parameters: {
+      type: 'object',
+      properties: {
+        case_id: CASE_ID_PROP,
+        category: {
+          type: 'string',
+          enum: NEED_CATEGORIES,
+          description: 'The category returned by resolve_need.',
+        },
+        location: {
+          type: 'string',
+          description: 'Where the caller is: city, county or ZIP, e.g. "90048" or "Los Angeles, CA".',
+        },
+      },
+      required: ['case_id', 'category', 'location'],
     },
   },
   discover_program: {
