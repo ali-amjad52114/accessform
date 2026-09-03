@@ -8,31 +8,33 @@ import { StartConversationButton } from '../components/conversation/StartConvers
 const ACCESSFORM_PHONE_E164 = '+19452772309';
 const ACCESSFORM_PHONE_DISPLAY = '+1 (945) 277-2309';
 
-/** One example per launch-catalog need: hospital bill, paratransit, disability accommodation. */
+/** How callers actually open the conversation. */
 const EXAMPLE_UTTERANCES = [
-  'I got a hospital bill I can’t pay.',
-  'I can’t walk far and I need to get to my doctor.',
-  'I’m a college student with ADHD and I need accommodations.',
+  'I got a bill from Cedars-Sinai for $7,800 and I can’t afford it.',
+  'I’m on Social Security and the hospital sent me a bill I can’t pay.',
 ] as const;
+
+/** The sponsor APIs behind the call, in pipeline order. */
+const POWERED_BY = ['Vapi', 'SerpApi', 'Xano', 'Nutrient'] as const;
 
 export default function StartPage() {
   return (
     <div className="af-page">
-      <SiteHeader aside="Voice · Official forms" />
+      <SiteHeader aside="Healthcare · Financial Assistance" />
 
       <main className="af-container" id="main">
         <div className="af-hero">
           <div>
             <h1 className="af-hero__headline">
-              Paperwork
-              <br className="af-hero__break" /> shouldn&apos;t require sight.
+              Healthcare access
+              <br className="af-hero__break" /> for every ability.
             </h1>
 
             <p className="af-hero__lead">
-              Tell AccessForm what is going on, in your own words. It finds the
-              official program for your situation, turns its form into a
-              conversation, fills the real document, and texts you what is
-              still missing.
+              A voice-first AI agent for people with disabilities. No forms to
+              read, no screens to navigate &mdash; just a phone call that walks
+              you through your hospital&apos;s financial-assistance application
+              and texts you the filled form with what is still missing.
             </p>
 
             <div className="af-hero__actions">
@@ -55,6 +57,13 @@ export default function StartPage() {
             </div>
 
             <LiveCallWatcher mode="start" />
+
+            <p className="af-powered" aria-label="Powered by">
+              <span className="af-powered__label">Powered by</span>
+              {POWERED_BY.map((name) => (
+                <span className="af-powered__chip" key={name}>{name}</span>
+              ))}
+            </p>
 
             <p className="af-hero__try" id="example-utterance-label">
               Try saying:

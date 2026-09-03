@@ -2,10 +2,10 @@ import { Card } from './Card';
 
 /** The five things AccessForm does, in order — for any need, any official form. */
 export const WHAT_HAPPENS_STEPS = [
-  'Tell us what’s going on',
-  'We find the official program and form',
+  'Tell us about the bill',
+  'We find your hospital’s official assistance form',
   'Answer a few questions by voice',
-  'We fill the real form',
+  'We fill the hospital’s real PDF',
   'You get it by text, with what’s still missing',
 ] as const;
 

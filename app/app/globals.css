@@ -1531,3 +1531,30 @@ kbd {
   font-size: 17px; font-weight: 600;
 }
 .af-cv-livebanner a { text-decoration: none; }
+
+/* Sponsor row under the hero actions */
+.af-powered {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  margin: 20px 0 0;
+}
+.af-powered__label {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted, #66635F);
+  margin-right: 4px;
+}
+.af-powered__chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border, #D8D3CB);
+  background: var(--surface, #FFFFFF);
+  font-size: 15px;
+  font-weight: 600;
+}
