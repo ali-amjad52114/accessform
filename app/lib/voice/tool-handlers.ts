@@ -191,7 +191,7 @@ async function xanoJson<T>(path: string, init?: RequestInit): Promise<T> {
  * PUT /cases/{id} — best effort. The endpoint is new in M1; a deployment
  * without it must not fail the caller's turn.
  */
-async function updateCase(caseId: Id, patch: Record<string, unknown>): Promise<boolean> {
+export async function updateCase(caseId: Id, patch: Record<string, unknown>): Promise<boolean> {
   try {
     await xanoJson(`/cases/${encodeURIComponent(caseId)}`, {
       method: 'PUT',

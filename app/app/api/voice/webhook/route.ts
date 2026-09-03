@@ -11,7 +11,7 @@
 import { NextResponse } from 'next/server';
 import { ensureVoiceAdaptersRegistered } from '../../../../lib/adapters/register-voice';
 import { bufferTranscript, caseForCall } from '../../../../lib/voice/call-registry';
-import { runToolCallsForCall } from '../../../../lib/voice/run-for-call';
+import { ensureCaseForCall, runToolCallsForCall } from '../../../../lib/voice/run-for-call';
 import {
   parseVapiServerMessage,
   parseVapiTranscript,
@@ -122,7 +122,13 @@ export async function POST(request: Request): Promise<Response> {
 
   // A phone call carries no case id of its own; the registry knows which
   // case this call opened (browser sessions pass one as a variable instead).
-  const caseId = message.caseId ?? caseForCall(message.callId);
+  let caseId = message.caseId ?? caseForCall(message.callId);
+
+  // A phone call that just connected gets its case immediately, so the
+  // conversation page can follow it before the caller has said a word.
+  if (!caseId && message.type === 'status-update' && message.raw.status === 'in-progress') {
+    caseId = await ensureCaseForCall(message.callId, callerPhoneOf(message.raw));
+  }
 
   if (message.type === 'transcript') {
     if (caseId) {

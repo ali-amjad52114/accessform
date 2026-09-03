@@ -19,7 +19,7 @@ import {
   rememberCaseForCall,
   type PendingTurn,
 } from './call-registry';
-import { runVoiceTool } from './tool-handlers';
+import { runVoiceTool, updateCase, voiceToolHandlers } from './tool-handlers';
 import type { VapiServerMessage } from './vapi-messages';
 
 export interface ToolCallResult {
@@ -46,6 +46,30 @@ export async function flushPendingTranscripts(callId: string | null, caseId: str
   }
 }
 
+/**
+ * Open the call's case the moment the call connects, before the caller has
+ * said anything, so the conversation page can follow the call from its first
+ * second. The agent's later `create_case` then lands on this case and fills
+ * in the situation. Returns the case id, or null when Xano refused.
+ */
+export async function ensureCaseForCall(callId: string | null, callerPhone: string | null): Promise<string | null> {
+  const existing = caseForCall(callId);
+  if (existing) return existing;
+  if (!callId) return null;
+  try {
+    const created = await voiceToolHandlers.create_case({
+      situation_text: '',
+      ...(callerPhone ? { caller_phone: callerPhone } : {}),
+    });
+    rememberCaseForCall(callId, created.case_id);
+    await flushPendingTranscripts(callId, created.case_id);
+    return created.case_id;
+  } catch (error) {
+    console.warn('[voice] could not open a case at call start:', (error as Error).message);
+    return null;
+  }
+}
+
 function caseIdFromResult(result: Record<string, unknown>): string | null {
   const value = result.case_id ?? result.id;
   return typeof value === 'string' && value ? value : typeof value === 'number' ? String(value) : null;
@@ -65,7 +89,17 @@ export async function runToolCallsForCall(
     const knownCase = message.caseId ?? caseForCall(callId);
 
     if (call.name === 'create_case' && knownCase) {
-      // One call, one case. Hand back the case this call already opened.
+      // One call, one case. Hand back the case this call already opened, and
+      // record what the caller said on it (the case may have been opened empty
+      // at call start, or the caller may have changed what they need).
+      const situation = typeof given.situation_text === 'string' ? given.situation_text.trim() : '';
+      const location = typeof given.location === 'string' ? given.location.trim() : '';
+      if (situation || location) {
+        await updateCase(knownCase, {
+          ...(situation ? { situation_text: situation } : {}),
+          ...(location ? { location } : {}),
+        });
+      }
       let status: unknown = 'CREATED';
       try {
         status = (await getXanoAdapter().getCase(knownCase)).case.status;

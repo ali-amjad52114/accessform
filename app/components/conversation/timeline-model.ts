@@ -42,6 +42,14 @@ export interface CardItem {
   timestamp: IsoTimestamp;
   /** The event that made the card appear. */
   event: CaseEvent;
+  /**
+   * The events that belong to this card's request: from its trigger up to the
+   * next card of the same kind. A caller who changes what they need mid-call
+   * gets a fresh card for the new request instead of the old one up top.
+   */
+  events: CaseEvent[];
+  /** False for a card that a later request of the same kind superseded. */
+  latest: boolean;
 }
 
 export interface SystemItem {
@@ -107,16 +115,43 @@ export function buildTimeline(
   browserTurns: TranscriptTurn[],
 ): TimelineItem[] {
   const items: TimelineItem[] = [];
-  const seenCards = new Set<CardKind>();
   const savedUtterances = new Set<string>();
 
   const sorted = [...events].sort(compareByTime);
+
+  /*
+   * Cards repeat per request. A card kind gets a new card when its trigger
+   * arrives after the caller has spoken since the previous card of that kind;
+   * otherwise the trigger just updates the card that is already there. So one
+   * request = one search card, one form card; a second request mid-call gets
+   * its own, in the right place, below the words that asked for it.
+   */
+  const lastCard = new Map<CardKind, { item: CardItem; userTurnsAtCreation: number }>();
+  let userTurns = 0;
+
+  const openCard = (card: CardKind, event: CaseEvent) => {
+    const previous = lastCard.get(card);
+    if (previous && previous.userTurnsAtCreation === userTurns) return; // same request: update in place
+    const item: CardItem = {
+      kind: 'card',
+      id: `card:${card}:${event.id}`,
+      card,
+      timestamp: event.timestamp,
+      event,
+      events: [],
+      latest: true,
+    };
+    if (previous) previous.item.latest = false;
+    lastCard.set(card, { item, userTurnsAtCreation: userTurns });
+    items.push(item);
+  };
 
   for (const event of sorted) {
     if (event.event_type === 'transcript_turn') {
       const speaker = actorToSpeaker(event.actor);
       const text = event.message?.trim();
       if (!speaker || !text) continue;
+      if (speaker === 'user') userTurns += 1;
       savedUtterances.add(`${speaker}:${normalizeUtterance(text)}`);
       items.push({
         kind: 'turn',
@@ -131,29 +166,13 @@ export function buildTimeline(
 
     const card = CARD_TRIGGERS[event.event_type];
     if (card) {
-      /* A card appears once, at its first trigger; later events only update it. */
-      if (seenCards.has(card)) continue;
-      seenCards.add(card);
-      items.push({
-        kind: 'card',
-        id: `card:${card}`,
-        card,
-        timestamp: event.timestamp,
-        event,
-      });
+      openCard(card, event);
       continue;
     }
 
     /* The form card should exist before the first answer lands in it. */
-    if (event.event_type === 'answer_saved' && !seenCards.has('form')) {
-      seenCards.add('form');
-      items.push({
-        kind: 'card',
-        id: 'card:form',
-        card: 'form',
-        timestamp: event.timestamp,
-        event,
-      });
+    if (event.event_type === 'answer_saved' && !lastCard.has('form')) {
+      openCard('form', event);
       continue;
     }
 
@@ -167,6 +186,20 @@ export function buildTimeline(
         timestamp: event.timestamp,
       });
     }
+  }
+
+  /* Slice the event stream per card: its trigger up to the next card of its kind. */
+  const cards = items.filter((item): item is CardItem => item.kind === 'card');
+  for (const card of cards) {
+    const next = cards.find(
+      (other) => other.card === card.card && compareByTime(other, card) > 0 && other !== card,
+    );
+    const from = Date.parse(card.timestamp);
+    const to = next ? Date.parse(next.timestamp) : Number.POSITIVE_INFINITY;
+    card.events = sorted.filter((event) => {
+      const at = Date.parse(event.timestamp);
+      return at >= from && at < to;
+    });
   }
 
   for (const turn of browserTurns) {

@@ -114,6 +114,21 @@ export function Timeline({
           );
         }
 
+        if (!item.latest && (item.card === 'form' || item.card === 'missing' || item.card === 'result')) {
+          // Superseded by a later request in the same call: keep the place, drop the detail.
+          const label =
+            item.card === 'form'
+              ? 'Started filling a form for the earlier request'
+              : item.card === 'missing'
+                ? 'Checked what the earlier request still needed'
+                : 'Prepared a document for the earlier request';
+          return (
+            <p key={item.id} className="af-cv-gap">
+              {label} · replaced by the request below
+            </p>
+          );
+        }
+
         switch (item.card) {
           case 'situation':
             return <SituationCard key={item.id} event={item.event} bundle={bundle} />;
@@ -141,7 +156,7 @@ export function Timeline({
             );
           }
           case 'search':
-            return <SearchCard key={item.id} events={events} bundle={bundle} />;
+            return <SearchCard key={item.id} events={item.events} bundle={bundle} />;
           case 'form':
             return <FormCard key={item.id} bundle={bundle} progress={progress} events={events} />;
           case 'missing':
