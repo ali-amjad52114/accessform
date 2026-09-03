@@ -505,7 +505,7 @@ export function formatDay(iso: string | number | null | undefined): string {
   return date.toLocaleDateString([], { day: 'numeric', month: 'short' });
 }
 
-/** "+17097656030" → "••• ••• 6030". Never shows more than the last four digits. */
+/** "+15555550123" → "••• ••• 0123". Never shows more than the last four digits. */
 export function maskPhone(e164: string): string {
   const digits = e164.replace(/\D/g, '');
   const last4 = digits.slice(-4);
