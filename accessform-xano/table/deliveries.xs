@@ -13,8 +13,11 @@ table deliveries {
       table = "cases"
     }
 
+    // "email" = the filled application emailed to the program's published
+    // intake address after the person's explicit approval (approval_recorded
+    // event). Added 2026-09-03; push this table before email rows will persist.
     enum channel?="sms" {
-      values = ["sms"]
+      values = ["sms", "email"]
     }
 
     // E.164 destination. Masked (last 4) everywhere it is spoken or logged.

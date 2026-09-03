@@ -194,9 +194,15 @@ export const CASE_DELIVERY_STATUSES = [
   'failed',
 ] as const satisfies readonly CaseDeliveryStatus[];
 
-export type DeliveryChannel = 'sms';
+/**
+ * - sms    the summary text with the signed link (send_summary)
+ * - email  the filled application emailed to the program's published intake
+ *          address after the person's explicit approval (POST /api/delivery/email).
+ *          Requires the Xano `deliveries.channel` enum to include "email".
+ */
+export type DeliveryChannel = 'sms' | 'email';
 
-export const DELIVERY_CHANNELS = ['sms'] as const satisfies readonly DeliveryChannel[];
+export const DELIVERY_CHANNELS = ['sms', 'email'] as const satisfies readonly DeliveryChannel[];
 
 /**
  * - queued   row written, provider not yet called (or call in flight)

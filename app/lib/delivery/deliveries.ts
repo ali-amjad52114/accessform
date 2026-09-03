@@ -12,10 +12,12 @@ import { xanoCredentials } from '../adapters/env';
 import { AdapterError } from '../adapters/errors';
 import { requestJson } from '../adapters/http';
 import {
+  DELIVERY_CHANNELS,
   DELIVERY_STATUSES,
   M1_XANO_ENDPOINTS,
   type CreateDeliveryRequest,
   type Delivery,
+  type DeliveryChannel,
   type DeliveryStatus,
   type Id,
 } from '../contract';
@@ -55,7 +57,9 @@ export function normalizeDelivery(raw: unknown, fallback: Delivery): Delivery {
   return {
     id: str(r.id, fallback.id),
     case_id: str(r.case_id, fallback.case_id),
-    channel: 'sms',
+    channel: (DELIVERY_CHANNELS as readonly string[]).includes(str(r.channel))
+      ? (str(r.channel) as DeliveryChannel)
+      : fallback.channel,
     to: str(r.to, fallback.to),
     message: str(r.message, fallback.message),
     document_url: str(r.document_url, fallback.document_url),
