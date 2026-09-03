@@ -1,7 +1,7 @@
-import Link from 'next/link';
-import { Mic, Phone } from 'lucide-react';
+import { Phone } from 'lucide-react';
 import { SiteHeader } from '../components/SiteHeader';
 import { WhatHappensCard } from '../components/WhatHappensCard';
+import { StartConversationButton } from '../components/conversation/StartConversationButton';
 
 /** The AccessForm phone number (Twilio, routed to the Vapi assistant). */
 const ACCESSFORM_PHONE_E164 = '+19452772309';
@@ -47,15 +47,10 @@ export default function StartPage() {
                   <span className="af-btn__sub">{ACCESSFORM_PHONE_DISPLAY}</span>
                 </span>
               </a>
-              <Link className="af-btn af-btn--secondary" href="/live">
-                <Mic
-                  className="af-btn__icon"
-                  size={24}
-                  strokeWidth={2.5}
-                  aria-hidden="true"
-                />
-                Start in browser
-              </Link>
+              <StartConversationButton
+                className="af-btn af-btn--secondary"
+                label="Start in browser"
+              />
             </div>
 
             <p className="af-hero__try" id="example-utterance-label">
