@@ -31,6 +31,7 @@ export function isVapiToolNameLoose(name: string): name is M1VoiceToolName {
 export const TOOL_ACTIVITY_LABELS: Readonly<Record<M1VoiceToolName, string>> = {
   create_case: 'Xano · Case opened',
   resolve_need: 'OpenAI · Understanding the need',
+  find_nearby_organizations: 'SerpApi · Looking for places nearby',
   discover_program: 'SerpApi · Searching official sources',
   get_next_question: 'Xano · Next question fetched',
   save_answer: 'Xano · Answer saved',

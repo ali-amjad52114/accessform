@@ -41,6 +41,7 @@ export const DELIVERY_CHANNELS = ['sms'];
 export const TOOL_NAMES = [
   'create_case',
   'resolve_need',
+  'find_nearby_organizations',
   'discover_program',
   'get_next_question',
   'save_answer',
@@ -71,6 +72,8 @@ THE ORDER OF THE CONVERSATION
 2. OPEN THE CASE. As soon as they have described their situation, call create_case with situation_text set to what they said. Remember the case_id it returns and pass it to every later tool call.
 3. UNDERSTAND THE NEED. Call resolve_need with the case_id and everything they have said so far. If it returns a clarifying_question or the note says you are not sure, ask that question, listen, and call resolve_need again. Do not guess a category yourself.
 4. WHERE ARE THEY. If you do not already know where the caller is, ask: "Where are you right now?" A city or a ZIP code is enough. Do not ask for a street address at this point.
+4a. WHICH ORGANIZATION. If the caller has NOT named an organization and this kind of need belongs to one — a hospital, a transit agency, a college, a county office — call find_nearby_organizations with the case_id, the category and the location, as soon as you know where they are.
+4b. LET THEM PICK. Read the list it returns as numbers, one at a time — "one, ...; two, ..." — with the name and roughly how far apart they are, then ask which one they mean. Wait for their answer and use the exact name they picked. Never pick one for them, and never treat a place on this list as a verified program: it is only a place nearby. If nothing comes back, say so plainly and ask them for the name instead.
 5. FIND THE OFFICIAL FORM. Call discover_program with the case_id, the category from resolve_need, the exact organization the caller named (if they named one — never invent one), and the location. If it returns found=false: tell the caller plainly that you could not verify an official form for that organization or place, so you cannot fill one for them yet. Do not guess, do not offer a different organization's form, and do not start the interview. Offer to note their situation, then let them end the call. If found=true, tell them you found the current official form for that program from a verified official source, and say the organization's name. If the note says the form is not a fillable PDF, tell them where the official form is and what the next step is, offer to text them the link, and do not start an interview.
 6. INTERVIEW FROM THE FORM. Call get_next_question. Ask the prompt it returns, in plain words, one question at a time. When they answer, repeat it back briefly, then call save_answer with the exact field_id from get_next_question and the answer as plain text. Then call get_next_question again. Keep going until it returns done=true. The tool tells you which section you are in and how far along you are; you may mention that ("that's the last question about your trips") but never invent progress.
 7. CHECK. Call validate_case. It returns what is still missing.
@@ -132,6 +135,28 @@ export const TOOL_SCHEMAS = {
         },
       },
       required: ['case_id', 'situation_text'],
+    },
+  },
+  find_nearby_organizations: {
+    description:
+      'List up to five organizations of the right kind near the caller, so they can choose one by number. ' +
+      'Use it only when the caller has NOT named an organization and the need requires one. ' +
+      'These are places nearby, not verified programs — call discover_program with the name they pick.',
+    parameters: {
+      type: 'object',
+      properties: {
+        case_id: CASE_ID_PROP,
+        category: {
+          type: 'string',
+          enum: NEED_CATEGORIES,
+          description: 'The category returned by resolve_need.',
+        },
+        location: {
+          type: 'string',
+          description: 'Where the caller is: city, county or ZIP, e.g. "90048" or "Los Angeles, CA".',
+        },
+      },
+      required: ['case_id', 'category', 'location'],
     },
   },
   discover_program: {

@@ -10,6 +10,8 @@
  *     `{ refresh: true }` AND demo mode is off AND a key is present.
  *   - `serpOrganicSearch()` — used by the M1 resolver — counts every query
  *     against the run budget and refuses once it is spent.
+ *   - `serpMapsSearch()` — used by nearby-organization lookup — does the same,
+ *     one credit per call, and its callers cache the result on disk.
  *
  * Queries are templated from `{ category, organization, location }` and the
  * allowlist is built per request (`discovery-rules.ts`). Nothing here names an
@@ -68,6 +70,22 @@ interface SerpOrganicResult {
 interface SerpSearchResponse {
   error?: string;
   organic_results?: SerpOrganicResult[];
+}
+
+/** One `local_results` entry of the SerpApi `google_maps` engine, as received. */
+export interface SerpMapsLocalResult {
+  title?: string;
+  address?: string;
+  gps_coordinates?: { latitude?: number; longitude?: number };
+  place_id?: string;
+  phone?: string;
+  website?: string;
+  rating?: number;
+}
+
+interface SerpMapsSearchResponse {
+  error?: string;
+  local_results?: SerpMapsLocalResult[];
 }
 
 interface SerpAccountResponse {
@@ -141,6 +159,103 @@ export async function serpOrganicSearch(
     });
   }
   return hits;
+}
+
+/* ------------------------------------------------------------------ */
+/* Google Maps search (nearby organizations)                           */
+/* ------------------------------------------------------------------ */
+
+/** Max places one maps search hands back. One credit buys at most this many. */
+export const SERP_MAPS_MAX_RESULTS = 5 as const;
+
+/** One place from the SerpApi `google_maps` engine, after normalization. */
+export interface SerpMapsPlace {
+  title: string;
+  address: string;
+  /** Absent for the rare result SerpApi returns without coordinates. */
+  gps_coordinates: { latitude: number; longitude: number } | null;
+  place_id: string;
+  phone?: string;
+  website?: string;
+  rating?: number;
+}
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * One Google Maps search through SerpApi, for "which organizations of this
+ * kind are near the caller?".
+ *
+ * `location` is folded into the query text (`"hospital near 90048"`) rather
+ * than sent as a separate parameter: the caller gives us a spoken city or ZIP,
+ * never the latitude/longitude pair the `google_maps` engine's `ll` parameter
+ * wants.
+ *
+ * Costs exactly one credit against the shared run budget, and refuses under
+ * the same conditions as `serpOrganicSearch` — demo mode, no key, or a spent
+ * budget. Never returns fixture data.
+ */
+export async function serpMapsSearch(input: {
+  query: string;
+  location?: string;
+}): Promise<SerpMapsPlace[]> {
+  const key = serpApiKey();
+  if (isDemoMode() || !key) {
+    throw new AdapterError('serpapi', 'maps', 'live search not permitted (demo mode or no key)');
+  }
+  if (budget.used >= budget.limit) {
+    throw new AdapterError('serpapi', 'maps', `run budget of ${budget.limit} searches is spent`);
+  }
+
+  const where = (input.location ?? '').replace(/\s+/g, ' ').trim();
+  const what = input.query.replace(/\s+/g, ' ').trim();
+  const q = where ? `${what} near ${where}` : what;
+
+  budget.used += 1;
+  const payload = await requestJson<SerpMapsSearchResponse>(
+    'serpapi',
+    'maps',
+    SERPAPI_SEARCH_URL,
+    { query: { engine: 'google_maps', type: 'search', q, api_key: key } },
+  );
+  if (payload.error) {
+    throw new AdapterError('serpapi', 'maps', payload.error);
+  }
+
+  return parseMapsResults(payload.local_results);
+}
+
+/**
+ * Normalize SerpApi `local_results` into places. Exported so a recorded
+ * response can be parsed in a test without spending a credit.
+ */
+export function parseMapsResults(
+  results: readonly SerpMapsLocalResult[] | undefined,
+): SerpMapsPlace[] {
+  const places: SerpMapsPlace[] = [];
+  for (const result of results ?? []) {
+    const title = (result.title ?? '').trim();
+    if (!title) continue;
+    const latitude = finiteNumber(result.gps_coordinates?.latitude);
+    const longitude = finiteNumber(result.gps_coordinates?.longitude);
+    const place: SerpMapsPlace = {
+      title,
+      address: (result.address ?? '').trim(),
+      gps_coordinates:
+        latitude !== null && longitude !== null ? { latitude, longitude } : null,
+      place_id: (result.place_id ?? '').trim(),
+    };
+    if (result.phone) place.phone = result.phone;
+    // `website` is genuinely absent for many places — never invent one.
+    if (result.website) place.website = result.website;
+    const rating = finiteNumber(result.rating);
+    if (rating !== null) place.rating = rating;
+    places.push(place);
+    if (places.length >= SERP_MAPS_MAX_RESULTS) break;
+  }
+  return places;
 }
 
 /** Pause between consecutive queries. */
