@@ -91,5 +91,30 @@
     },
     "verified_at": "2026-09-03",
     "verified": true
+  },
+  {
+    "need": "hospital_financial_assistance",
+    "organization": "County of Santa Clara Health System (SCVMC, O'Connor, Regional Medical Center of San Jose)",
+    "region": "San Jose, CA",
+    "kind": "hospital",
+    "program": "CSCHS Financial Assistance Application (fillable; English pages 1-4 of a 7-language packet)",
+    "application_url": "https://api.hdc.hcai.ca.gov/Public/Extract/Attachment?id=6b326874-df9c-4c6a-8133-97d5b5e41636",
+    "policy_url": "https://hcai.ca.gov/affordability/hospital-billing-policies/oconnor-hospital/",
+    "source_domain": "api.hdc.hcai.ca.gov",
+    "local_file": "spike/cschs_financial_assistance_application.pdf",
+    "form_kind": "fillable_pdf",
+    "pages": 32,
+    "field_count": 347,
+    "english_pages": 4,
+    "english_field_count": 106,
+    "sha256": "ab08829b0a016089",
+    "field_types": {
+      "/Tx": 226,
+      "/Btn": 120,
+      "/Sig": 1
+    },
+    "verified_at": "2026-09-03",
+    "verified": true,
+    "notes": "Xano programs 12 (SCVMC), 13 (O'Connor), 14 (Regional) share this file via a facility= query param. Kaiser Santa Clara's MFA application is flat (0 fields) on both HCAI and kaiserpermanente.org."
   }
 ]

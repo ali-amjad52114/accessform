@@ -526,6 +526,21 @@ export function applyPostRules(
  * Extraction + model + post-rules, no caches. Exported for tests and for
  * callers that already hold the bytes.
  */
+/**
+ * Multi-language packets repeat the same application in several scripts.
+ * Only the first section (English) is interviewed and filled; the rest of the
+ * pages are left untouched. Keyed by the first 16 hex of the PDF's sha256.
+ */
+const FORM_PAGE_LIMITS: Readonly<Record<string, number>> = {
+  ab08829b0a016089: 4, // County of Santa Clara Health System financial assistance (EN, ES, ZH-T, ZH-S, TL, PA, FA)
+};
+
+function applyPageLimit<T extends { sha256: string; fields: Array<{ page: number }> }>(form: T): T {
+  const limit = FORM_PAGE_LIMITS[form.sha256.slice(0, 16)];
+  if (!limit) return form;
+  return { ...form, fields: form.fields.filter((f) => f.page === 0 || f.page <= limit) };
+}
+
 export async function buildFormSchema(
   programId: Id,
   form: ExtractedForm,
@@ -766,7 +781,7 @@ export async function understandFormFromBytes(
 ): Promise<UnderstandFormResult> {
   const log = options.log ?? (() => undefined);
   const dir = formCacheDir(options.cacheDir);
-  const form = await extractFormFields(pdfBytes);
+  const form = applyPageLimit(await extractFormFields(pdfBytes));
   log(`understand-form: ${form.field_count} fields on ${form.page_count} pages, sha256 ${form.sha16}`);
 
   const xanoMode = options.xano ?? 'auto';
