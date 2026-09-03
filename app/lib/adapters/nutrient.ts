@@ -501,8 +501,9 @@ export class LiveNutrientAdapter implements NutrientAdapter {
    * engine on 401/402/403). Only a hard failure of both degrades to the fixture.
    */
   async fillForm(input: FillFormInput): Promise<FilledDocument> {
-    const { engine: _engine, ...filled } = await this.fillFormWithEngine(input);
-    return filled;
+    // `FilledDocument.engine` is optional in the contract, so the engine that
+    // actually produced the bytes travels with them (see agent feed labels).
+    return this.fillFormWithEngine(input);
   }
 
   /**
@@ -633,8 +634,12 @@ export class LiveNutrientAdapter implements NutrientAdapter {
       version_hash: versionHash,
     });
 
+    // Sponsor labels are literal: only work Nutrient actually did is attributed
+    // to Nutrient. The local engine and the fixture are recorded as the system
+    // of record's own work, with `engine` saying which one ran.
+    const actor = engine === 'nutrient' ? 'nutrient' : 'xano';
     await this.xano.appendEvent(input.case_id, {
-      actor: 'nutrient',
+      actor,
       event_type: 'document_generated',
       message: 'Completed PDF generated',
       metadata_json: {
@@ -648,7 +653,7 @@ export class LiveNutrientAdapter implements NutrientAdapter {
     // that an accessibility pass ran.
     const accessCopy = accessibilityEventFor(tagged.accessibilityStatus);
     await this.xano.appendEvent(input.case_id, {
-      actor: 'nutrient',
+      actor,
       event_type: accessCopy.event_type,
       message: accessCopy.message,
       metadata_json: { accessibility_status: tagged.accessibilityStatus, engine },
