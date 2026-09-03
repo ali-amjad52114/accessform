@@ -12,7 +12,7 @@
 import { NextResponse } from 'next/server';
 import { ensureVoiceAdaptersRegistered } from '../../../../lib/adapters/register-voice';
 import { M1_VOICE_TOOL_NAMES } from '../../../../lib/contract';
-import { runVoiceTool } from '../../../../lib/voice/tool-handlers';
+import { runToolCallsForCall } from '../../../../lib/voice/run-for-call';
 import { parseVapiServerMessage, toolResponse } from '../../../../lib/voice/vapi-messages';
 
 export const runtime = 'nodejs';
@@ -66,19 +66,7 @@ export async function POST(request: Request): Promise<Response> {
   ensureVoiceAdaptersRegistered();
 
   const callerPhone = callerPhoneOf(message.raw);
-
-  const results = await Promise.all(
-    message.toolCalls.map(async (call) => {
-      const given = typeof call.args === 'object' && call.args ? (call.args as Record<string, unknown>) : {};
-      const args: Record<string, unknown> = {
-        ...(message.caseId ? { case_id: message.caseId } : {}),
-        ...(callerPhone ? { caller_phone: callerPhone } : {}),
-        ...given,
-      };
-      const outcome = await runVoiceTool(call.name, args);
-      return { toolCallId: call.id, result: outcome.result };
-    }),
-  );
+  const results = await runToolCallsForCall(message, callerPhone);
 
   return NextResponse.json(toolResponse(results));
 }

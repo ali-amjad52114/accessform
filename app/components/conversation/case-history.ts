@@ -138,14 +138,22 @@ export interface CaseSummary {
   delivery_status?: CaseDeliveryStatus | string | null;
   answers_saved?: number;
   answers_expected?: number;
+  /** Last four digits of the caller's number when the case came in by phone. */
+  caller_phone_last4?: string | null;
 }
 
-export async function fetchCaseSummaries(ids: Id[]): Promise<CaseSummary[]> {
-  if (ids.length === 0) return [];
-  const response = await fetch(
-    `/api/cases/summary?ids=${encodeURIComponent(ids.join(','))}`,
-    { cache: 'no-store' },
-  );
+/**
+ * Summaries for this browser's ids plus, when `recent` is set, the newest
+ * cases in the system of record — that is how a case opened by phone appears
+ * on the laptop that is watching. Newest first, as the server orders them.
+ */
+export async function fetchCaseSummaries(ids: Id[], options: { recent?: number } = {}): Promise<CaseSummary[]> {
+  const recent = options.recent ?? 0;
+  if (ids.length === 0 && recent === 0) return [];
+  const params = new URLSearchParams();
+  if (ids.length > 0) params.set('ids', ids.join(','));
+  if (recent > 0) params.set('recent', String(recent));
+  const response = await fetch(`/api/cases/summary?${params.toString()}`, { cache: 'no-store' });
   if (!response.ok) {
     throw new Error(`History could not be loaded (HTTP ${response.status}).`);
   }

@@ -69,7 +69,7 @@ HOW TO ASK
 
 THE ORDER OF THE CONVERSATION
 1. LISTEN. Your first message asks what is going on. Let them tell you in their own words. Do not interrupt to ask for an organization or an amount.
-2. OPEN THE CASE. As soon as they have described their situation, call create_case with situation_text set to what they said. Remember the case_id it returns and pass it to every later tool call.
+2. OPEN THE CASE. As soon as they have described their situation, call create_case with situation_text set to what they said. Remember the case_id it returns and pass it to every later tool call. ONE CALL, ONE CASE: never call create_case a second time in the same call. If the caller changes what they need, or asks about a different organization or program, keep the same case_id and call resolve_need again with what they said, then discover_program again. The conversation stays together in one case.
 3. UNDERSTAND THE NEED. Call resolve_need with the case_id and everything they have said so far. If it returns a clarifying_question or the note says you are not sure, ask that question, listen, and call resolve_need again. Do not guess a category yourself.
 4. WHERE ARE THEY. If you do not already know where the caller is, ask: "Where are you right now?" A city or a ZIP code is enough. Do not ask for a street address at this point.
 4a. WHICH ORGANIZATION. If the caller has NOT named an organization and this kind of need belongs to one — a hospital, a transit agency, a college, a county office — call find_nearby_organizations with the case_id, the category and the location, as soon as you know where they are.
@@ -340,7 +340,9 @@ export function buildAssistantPayload(baseUrl = serverBaseUrl()) {
     voice: { provider: 'vapi', voiceId: 'Clara' },
     transcriber: { provider: 'deepgram', model: 'nova-3', language: 'en' },
     server: { url: `${baseUrl}/api/voice/webhook` },
-    serverMessages: ['tool-calls', 'status-update', 'end-of-call-report'],
+    // `transcript` is what lets the conversation page show a phone call's
+    // words as they are spoken; the webhook stores each final turn as an event.
+    serverMessages: ['tool-calls', 'status-update', 'end-of-call-report', 'transcript'],
     clientMessages: [
       'transcript',
       'tool-calls',

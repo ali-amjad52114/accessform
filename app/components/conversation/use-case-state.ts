@@ -32,6 +32,7 @@ export interface UseCaseStateResult {
 }
 
 const POLL_MS = 2000;
+const IDLE_POLL_MS = 4000;
 const SETTLE_MS = 900;
 
 export function useCaseState(caseId: Id, active: boolean): UseCaseStateResult {
@@ -92,11 +93,36 @@ export function useCaseState(caseId: Id, active: boolean): UseCaseStateResult {
     };
   }, [refresh]);
 
-  /* Every 2 s while the call is live. */
+  /*
+   * Poll while the page is visible, not only during a browser call: the page
+   * is also how a phone call is watched from a laptop, and how an SMS link
+   * catches up on a call that ended minutes ago. Every 2 s while a call is
+   * live, every 4 s otherwise, paused when the tab is hidden.
+   */
   useEffect(() => {
-    if (!active) return;
-    const id = window.setInterval(() => void refresh(), POLL_MS);
-    return () => window.clearInterval(id);
+    let id: number | null = null;
+    const start = () => {
+      if (id !== null) return;
+      id = window.setInterval(() => void refresh(), active ? POLL_MS : IDLE_POLL_MS);
+    };
+    const stop = () => {
+      if (id !== null) window.clearInterval(id);
+      id = null;
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void refresh();
+        start();
+      } else {
+        stop();
+      }
+    };
+    if (document.visibilityState === 'visible') start();
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      stop();
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, [active, refresh]);
 
   /* One more read shortly after the call ends, so the last tool result lands. */

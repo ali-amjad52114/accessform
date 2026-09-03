@@ -14,6 +14,10 @@ import {
 import { StartConversationButton } from './StartConversationButton';
 import { formatDay } from './timeline-model';
 
+/** Newest cases pulled from the system of record for the list. */
+const RECENT_CASES = 20;
+const HISTORY_REFRESH_MS = 10_000;
+
 /**
  * Conversation history for this browser. The id list is localStorage; the
  * words on each row come from GET /api/cases/summary. An id the server does
@@ -34,6 +38,8 @@ export function Sidebar({
 }) {
   const [ids, setIds] = useState<Id[]>([]);
   const [summaries, setSummaries] = useState<Map<Id, CaseSummary>>(new Map());
+  /** Server order (newest first), including cases opened by phone. */
+  const [serverOrder, setServerOrder] = useState<Id[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   /* Keep the current case in history (an SMS link lands here directly). */
@@ -53,22 +59,36 @@ export function Sidebar({
     };
   }, []);
 
+  /*
+   * This browser's ids plus the newest cases in the system of record, so a
+   * conversation started by phone shows up here while it is happening.
+   * Re-read every 10 s while the tab is visible.
+   */
   useEffect(() => {
-    if (ids.length === 0) return;
     let cancelled = false;
-    fetchCaseSummaries(ids)
-      .then((rows) => {
-        if (cancelled) return;
-        setSummaries(new Map(rows.map((row) => [row.id, row])));
-        setError(null);
-      })
-      .catch((fetchError: Error) => {
-        if (!cancelled) setError(fetchError.message);
-      });
+    const load = () => {
+      if (document.visibilityState !== 'visible') return;
+      fetchCaseSummaries(ids, { recent: RECENT_CASES })
+        .then((rows) => {
+          if (cancelled) return;
+          setSummaries(new Map(rows.map((row) => [row.id, row])));
+          setServerOrder(rows.map((row) => row.id));
+          setError(null);
+        })
+        .catch((fetchError: Error) => {
+          if (!cancelled) setError(fetchError.message);
+        });
+    };
+    load();
+    const timer = window.setInterval(load, HISTORY_REFRESH_MS);
     return () => {
       cancelled = true;
+      window.clearInterval(timer);
     };
   }, [ids]);
+
+  /* Newest first as the server orders them, then any local id the server did not return. */
+  const listed: Id[] = [...serverOrder, ...ids.filter((id) => !serverOrder.includes(id))];
 
   return (
     <aside
@@ -100,12 +120,13 @@ export function Sidebar({
       ) : null}
 
       <ul className="af-cv-hist">
-        {ids.map((caseId) => {
+        {listed.map((caseId) => {
           const summary = summaries.get(caseId) ?? null;
           const pill = historyPill(summary);
           const current = caseId === currentCaseId;
           const title = summary?.situation_text?.trim() || summary?.program_name?.trim() || 'New conversation';
           const organization = summary?.organization_name?.trim() || null;
+          const byPhone = Boolean(summary?.caller_phone_last4) && !ids.includes(caseId);
           const day = formatDay(summary?.created_at);
           return (
             <li key={caseId}>
@@ -119,6 +140,7 @@ export function Sidebar({
                 {organization ? <span className="af-cv-hist__org">{organization}</span> : null}
                 <span className="af-cv-hist__meta">
                   {day ? <span>{day}</span> : null}
+                  {byPhone ? <span>by phone</span> : null}
                   <span className={`af-cv-pill af-cv-pill--${pill.tone}`}>{pill.label}</span>
                 </span>
               </Link>

@@ -10,7 +10,8 @@
 
 import { NextResponse } from 'next/server';
 import { ensureVoiceAdaptersRegistered } from '../../../../lib/adapters/register-voice';
-import { runVoiceTool } from '../../../../lib/voice/tool-handlers';
+import { bufferTranscript, caseForCall } from '../../../../lib/voice/call-registry';
+import { runToolCallsForCall } from '../../../../lib/voice/run-for-call';
 import {
   parseVapiServerMessage,
   parseVapiTranscript,
@@ -115,27 +116,26 @@ export async function POST(request: Request): Promise<Response> {
     // finalize_document must run through the document engine, not the fixture.
     ensureVoiceAdaptersRegistered();
     const callerPhone = callerPhoneOf(message.raw);
-    const results = await Promise.all(
-      message.toolCalls.map(async (call) => {
-        const given = typeof call.args === 'object' && call.args ? (call.args as Record<string, unknown>) : {};
-        const args: Record<string, unknown> = {
-          ...(message.caseId ? { case_id: message.caseId } : {}),
-          ...(callerPhone ? { caller_phone: callerPhone } : {}),
-          ...given,
-        };
-        const outcome = await runVoiceTool(call.name, args);
-        return { toolCallId: call.id, result: outcome.result };
-      }),
-    );
+    const results = await runToolCallsForCall(message, callerPhone);
     return NextResponse.json(toolResponse(results));
   }
 
-  if (message.caseId) {
-    if (message.type === 'transcript') {
-      await recordTranscript(message.caseId, message.callId, message.raw);
+  // A phone call carries no case id of its own; the registry knows which
+  // case this call opened (browser sessions pass one as a variable instead).
+  const caseId = message.caseId ?? caseForCall(message.callId);
+
+  if (message.type === 'transcript') {
+    if (caseId) {
+      await recordTranscript(caseId, message.callId, message.raw);
     } else {
-      await recordLifecycle(message.caseId, message.type, message.raw);
+      // Spoken before create_case ran: hold it, flushed onto the case later.
+      const turn = parseVapiTranscript(message.raw);
+      if (turn && turn.transcript_type === 'final') {
+        bufferTranscript(message.callId, { role: turn.role, text: turn.text, at: new Date().toISOString() });
+      }
     }
+  } else if (caseId) {
+    await recordLifecycle(caseId, message.type, message.raw);
   }
 
   return NextResponse.json({ received: message.type });

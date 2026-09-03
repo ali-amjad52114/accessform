@@ -11,6 +11,8 @@
  */
 
 import { NextResponse } from 'next/server';
+import { xanoCredentials } from '../../../../lib/adapters/env';
+import { requestJson } from '../../../../lib/adapters/http';
 import type { CaseBundle, CaseDeliveryStatus, CaseProgress, CaseStatus, Id } from '../../../../lib/contract';
 import { getXanoAdapter } from '../../../../lib/voice/xano-bridge';
 
@@ -19,6 +21,30 @@ export const dynamic = 'force-dynamic';
 
 /** Most ids one request will resolve. */
 const MAX_IDS = 30;
+/** Cap for `?recent=N` (GET /cases on Xano caps at 50). */
+const MAX_RECENT = 30;
+
+/**
+ * Ids of the newest cases in the system of record, via Xano `GET /cases`.
+ * Empty (never fixture ids) when Xano is not configured or the read fails.
+ */
+async function recentCaseIds(limit: number): Promise<Id[]> {
+  const creds = xanoCredentials();
+  if (!creds) return [];
+  try {
+    const payload = await requestJson<{ cases?: { id?: unknown }[] }>('xano', 'listCases', `${creds.baseUrl}/cases`, {
+      query: { limit },
+      headers: creds.apiKey ? { Authorization: `Bearer ${creds.apiKey}` } : {},
+      timeoutMs: 15_000,
+    });
+    return (payload.cases ?? [])
+      .map((row) => (typeof row.id === 'number' || typeof row.id === 'string' ? String(row.id) : ''))
+      .filter((id) => id.length > 0);
+  } catch (error) {
+    console.warn('[cases] summary: recent list unavailable —', (error as Error).message);
+    return [];
+  }
+}
 /** Cases read from Xano at the same time. */
 const CONCURRENCY = 5;
 
@@ -32,6 +58,8 @@ export interface CaseSummary {
   delivery_status: CaseDeliveryStatus;
   answers_saved?: number;
   answers_expected?: number;
+  /** Last four digits of the caller's number when the case came in by phone; never the full number. */
+  caller_phone_last4: string | null;
 }
 
 function parseIds(raw: string | null): Id[] {
@@ -57,6 +85,7 @@ function summarize(bundle: CaseBundle, progress: CaseProgress | null): CaseSumma
     status: bundle.case.status,
     created_at: bundle.case.created_at,
     delivery_status: bundle.case.delivery_status ?? 'none',
+    caller_phone_last4: bundle.case.caller_phone ? bundle.case.caller_phone.replace(/\D/g, '').slice(-4) || null : null,
   };
   if (progress) {
     summary.answers_saved = progress.answersSaved;
@@ -84,7 +113,13 @@ function createdAtMillis(summary: CaseSummary): number {
 }
 
 export async function GET(request: Request): Promise<Response> {
-  const ids = parseIds(new URL(request.url).searchParams.get('ids'));
+  const params = new URL(request.url).searchParams;
+  const requested = parseIds(params.get('ids'));
+  const recentRaw = Number(params.get('recent') ?? '0');
+  const recentLimit = Number.isFinite(recentRaw) ? Math.min(MAX_RECENT, Math.max(0, Math.floor(recentRaw))) : 0;
+  const recent = recentLimit > 0 ? await recentCaseIds(recentLimit) : [];
+  // Recent first, then anything this browser remembers that is not already listed.
+  const ids = Array.from(new Set([...recent, ...requested])).slice(0, MAX_IDS + MAX_RECENT);
   const cases: CaseSummary[] = [];
 
   for (let start = 0; start < ids.length; start += CONCURRENCY) {
