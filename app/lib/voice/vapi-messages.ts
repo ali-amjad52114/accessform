@@ -135,6 +135,29 @@ export function parseVapiServerMessage(body: unknown): VapiServerMessage {
   };
 }
 
+/** One spoken turn from a Vapi `transcript` server message. */
+export interface VapiTranscriptTurn {
+  role: 'user' | 'assistant';
+  /** The spoken words, trimmed. */
+  text: string;
+  transcript_type: 'partial' | 'final';
+}
+
+/**
+ * Read a `transcript` message (`role`, `transcript`, `transcriptType`). Returns
+ * null when the payload is not a usable transcript turn. Any role other than
+ * `user` is treated as the assistant (Vapi uses `assistant`; older payloads
+ * said `bot`).
+ */
+export function parseVapiTranscript(message: Record<string, unknown>): VapiTranscriptTurn | null {
+  if (text(message.type) !== 'transcript') return null;
+  const spoken = text(message.transcript);
+  if (!spoken) return null;
+  const role = text(message.role) === 'user' ? 'user' : 'assistant';
+  const kind = text(message.transcriptType) ?? text(message.transcript_type);
+  return { role, text: spoken, transcript_type: kind === 'final' ? 'final' : 'partial' };
+}
+
 /** The response body Vapi expects from a tool-call webhook. */
 export interface VapiToolResponse {
   results: { toolCallId: string; result: string }[];

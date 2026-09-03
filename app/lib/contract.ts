@@ -641,10 +641,20 @@ export interface FillFormInput {
   instantJson: InstantJson;
 }
 
+/**
+ * Which engine produced a document. `local` = pdf-lib in-process, `nutrient`
+ * = the Nutrient DWS API, `fixture` = the bundled demo placeholder. Recorded
+ * as `metadata_json.engine` on document events so nothing is labelled
+ * Nutrient output that Nutrient did not produce.
+ */
+export type DocumentEngineName = 'local' | 'nutrient' | 'fixture';
+
 export interface FilledDocument {
   pdfBytes: Uint8Array;
   byteLength: number;
   versionHash: string;
+  /** The engine that actually produced `pdfBytes`, when the adapter reports it. */
+  engine?: DocumentEngineName;
 }
 
 export interface TaggedDocument {
@@ -668,6 +678,8 @@ export interface FinalizedDocument {
   versionHash: string;
   fieldsFilled: number;
   document: CaseDocument;
+  /** The engine that produced the document, when known. */
+  engine?: DocumentEngineName;
 }
 
 export interface NutrientAdapter {

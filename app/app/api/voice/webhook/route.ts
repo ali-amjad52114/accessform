@@ -11,7 +11,11 @@
 import { NextResponse } from 'next/server';
 import { ensureVoiceAdaptersRegistered } from '../../../../lib/adapters/register-voice';
 import { runVoiceTool } from '../../../../lib/voice/tool-handlers';
-import { parseVapiServerMessage, toolResponse } from '../../../../lib/voice/vapi-messages';
+import {
+  parseVapiServerMessage,
+  parseVapiTranscript,
+  toolResponse,
+} from '../../../../lib/voice/vapi-messages';
 import { getXanoAdapter } from '../../../../lib/voice/xano-bridge';
 
 export const runtime = 'nodejs';
@@ -35,6 +39,27 @@ function callerPhoneOf(raw: Record<string, unknown>): string | null {
   const customer = record(call.customer ?? raw.customer);
   const number = customer.number;
   return typeof number === 'string' && number.trim() ? number.trim() : null;
+}
+
+/**
+ * Persist one FINAL transcript turn as a `transcript_turn` event so the
+ * conversation timeline can be rendered from the case record alone. Partial
+ * transcripts are dropped (Vapi re-sends the same words as they firm up).
+ * Never throws — Vapi must always get a 200 for a transcript message.
+ */
+async function recordTranscript(caseId: string, callId: string | null, raw: Record<string, unknown>) {
+  const turn = parseVapiTranscript(raw);
+  if (!turn || turn.transcript_type !== 'final') return;
+  try {
+    await getXanoAdapter().appendEvent(caseId, {
+      actor: turn.role === 'user' ? 'user' : 'voice_agent',
+      event_type: 'transcript_turn',
+      message: turn.text,
+      metadata_json: { role: turn.role, transcript_type: 'final', call_id: callId },
+    });
+  } catch (error) {
+    console.warn('[voice] webhook could not record transcript turn:', (error as Error).message);
+  }
 }
 
 async function recordLifecycle(caseId: string, type: string, raw: Record<string, unknown>) {
@@ -106,7 +131,11 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   if (message.caseId) {
-    await recordLifecycle(message.caseId, message.type, message.raw);
+    if (message.type === 'transcript') {
+      await recordTranscript(message.caseId, message.callId, message.raw);
+    } else {
+      await recordLifecycle(message.caseId, message.type, message.raw);
+    }
   }
 
   return NextResponse.json({ received: message.type });

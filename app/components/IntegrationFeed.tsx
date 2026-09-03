@@ -9,6 +9,21 @@ const ACTOR_LABEL: Readonly<Record<EventActor, string>> = {
   nutrient: 'Nutrient',
 };
 
+/**
+ * The document engine that actually produced an event's output, when the
+ * event says so (`metadata_json.engine`). Only 'nutrient' is Nutrient's work;
+ * the local pdf-lib engine and the demo fixture are labelled as themselves.
+ */
+const ENGINE_LABEL: Readonly<Record<string, string>> = {
+  local: 'Local PDF engine',
+  fixture: 'Fixture',
+};
+
+function engineLabel(event: CaseEvent): string | null {
+  const engine = event.metadata_json?.engine;
+  return typeof engine === 'string' ? ENGINE_LABEL[engine] ?? null : null;
+}
+
 function clockTime(timestamp: string): string {
   const parsed = new Date(timestamp);
   if (Number.isNaN(parsed.getTime())) return '';
@@ -20,7 +35,8 @@ function clockTime(timestamp: string): string {
 
 interface FeedRow {
   id: string;
-  actor: EventActor;
+  /** The label shown in the actor column (actor name, or the engine that ran). */
+  label: string;
   message: string;
   timestamp: string;
   /** How many identical consecutive events this row stands for. */
@@ -31,22 +47,19 @@ interface FeedRow {
  * A run of identical consecutive events (26 "Answer saved" rows) collapses to
  * one row with a count. This is a product surface, not a log console.
  */
-function collapse(events: CaseEvent[]): FeedRow[] {
+function collapse(events: CaseEvent[], labelFor: (event: CaseEvent) => string): FeedRow[] {
   const rows: FeedRow[] = [];
   for (const event of events) {
+    const label = labelFor(event);
     const previous = rows[rows.length - 1];
-    if (
-      previous &&
-      previous.actor === event.actor &&
-      previous.message === event.message
-    ) {
+    if (previous && previous.label === label && previous.message === event.message) {
       previous.count += 1;
       previous.timestamp = event.timestamp;
       continue;
     }
     rows.push({
       id: event.id,
-      actor: event.actor,
+      label,
       message: event.message,
       timestamp: event.timestamp,
       count: 1,
@@ -81,16 +94,18 @@ export function IntegrationFeed({
     );
   }
 
-  const rows = collapse(events);
-  const actorLabel = (actor: EventActor) =>
-    actor === 'user' && callerName ? callerName : ACTOR_LABEL[actor];
+  const labelFor = (event: CaseEvent): string => {
+    if (event.actor === 'user' && callerName) return callerName;
+    return engineLabel(event) ?? ACTOR_LABEL[event.actor];
+  };
+  const rows = collapse(events, labelFor);
 
   return (
     <>
       <ol className="af-feed">
         {rows.map((row) => (
           <li className="af-feed__row" key={row.id}>
-            <span className="af-feed__actor">{actorLabel(row.actor)}</span>
+            <span className="af-feed__actor">{row.label}</span>
             <span className="af-feed__message">
               {row.message}
               {row.count > 1 ? (

@@ -44,6 +44,7 @@ import {
   type CreateCaseToolInput,
   type CreateCaseToolResult,
   type DeliveryStatus,
+  type DocumentEngineName,
   type DiscoverProgramToolInput,
   type DiscoverProgramToolResult,
   type FinalizeDocumentToolInput,
@@ -75,6 +76,7 @@ import {
 import { buildPublicDocumentUrl, signedDocumentPath } from '../../app/api/document/_lib/public-url';
 import { sendSummary } from '../delivery/sms';
 import { resolveProgram } from '../discovery/resolve-program';
+import { resolveEngine } from '../document/engine';
 import { mapAnswers } from '../forms/map-answers';
 import { understandForm } from '../forms/understand-form';
 import { humanizeRequirementLabel } from '../interview/labels';
@@ -644,11 +646,14 @@ export const voiceToolHandlers: M1VoiceToolHandlers = {
       }
       if (schema.length > 0) {
         fieldCount = fieldCount || schema.length;
+        // understandForm reads the AcroForm with pdf-lib in-process; Nutrient
+        // is not involved, so the row is not attributed to it.
         await xano.appendEvent(args.case_id, {
-          actor: 'nutrient',
+          actor: 'xano',
           event_type: 'form_extracted',
           message: 'Form structure extracted',
           metadata_json: {
+            engine: 'local',
             fields: fieldCount,
             questions: schema.filter((field) => field.required).length,
             sections: [...new Set(schema.map((field) => field.section ?? ''))].filter(Boolean),
@@ -834,7 +839,13 @@ export const voiceToolHandlers: M1VoiceToolHandlers = {
       }
 
       if (instantJson) {
+        const requestedEngine = resolveEngine();
         const filled = await nutrient.fillForm({ pdfUrl: sourceUrl, instantJson });
+        // The adapter reports the engine that actually produced the bytes when
+        // it can; otherwise the configured engine is the best available truth.
+        const engine: DocumentEngineName = filled.engine ?? requestedEngine;
+        // Only Nutrient's own work is attributed to Nutrient on the feed.
+        const engineActor = engine === 'nutrient' ? 'nutrient' : 'xano';
         const tagged = await nutrient.autotag(filled.pdfBytes);
         const versionHash = sha256Hex(tagged.pdfBytes);
         const fileName = `case-${encodeURIComponent(args.case_id)}-${versionHash.slice(0, 12)}.pdf`;
@@ -854,10 +865,12 @@ export const voiceToolHandlers: M1VoiceToolHandlers = {
         const status = tagged.accessibilityStatus;
         if (!xanoWritesDocumentEvent || status === 'processed') {
           await xano.appendEvent(args.case_id, {
-            actor: 'nutrient',
+            actor: engineActor,
             event_type: 'document_generated',
             message: 'Completed PDF generated',
             metadata_json: {
+              engine,
+              requested_engine: requestedEngine,
               fields_filled: instantJson.formFieldValues.length,
               unmapped: unmapped.length,
               bytes: tagged.byteLength,
@@ -867,10 +880,10 @@ export const voiceToolHandlers: M1VoiceToolHandlers = {
         if (!xanoWritesDocumentEvent || status !== 'processed') {
           const accessCopy = accessibilityEventFor(status);
           await xano.appendEvent(args.case_id, {
-            actor: 'nutrient',
+            actor: engineActor,
             event_type: accessCopy.event_type,
             message: accessCopy.message,
-            metadata_json: { accessibility_status: status },
+            metadata_json: { accessibility_status: status, engine, requested_engine: requestedEngine },
           });
         }
         finalized = {
@@ -880,6 +893,7 @@ export const voiceToolHandlers: M1VoiceToolHandlers = {
           versionHash,
           fieldsFilled: instantJson.formFieldValues.length,
           document,
+          engine,
         };
       } else {
         // Pre-M1 adapter pipeline (the proven Cedars path). It writes its own
@@ -891,18 +905,19 @@ export const voiceToolHandlers: M1VoiceToolHandlers = {
     } else if (demo) {
       const document = await saveFallbackDocument(args.case_id, sourceUrl);
       const fieldsFilled = fixtures.filledFieldCount(args.case_id);
+      // Demo placeholder: no engine ran, so the rows are not attributed to Nutrient.
       await xano.appendEvent(args.case_id, {
-        actor: 'nutrient',
+        actor: 'xano',
         event_type: 'document_generated',
         message: 'Completed PDF generated',
-        metadata_json: { fields_filled: fieldsFilled, source: 'fixture' },
+        metadata_json: { engine: 'fixture', fields_filled: fieldsFilled, source: 'fixture' },
       });
       const copy = accessibilityEventFor(document.accessibility_status);
       await xano.appendEvent(args.case_id, {
-        actor: 'nutrient',
+        actor: 'xano',
         event_type: copy.event_type,
         message: copy.message,
-        metadata_json: { accessibility_status: document.accessibility_status, source: 'fixture' },
+        metadata_json: { engine: 'fixture', accessibility_status: document.accessibility_status, source: 'fixture' },
       });
       finalized = {
         caseId: args.case_id,
@@ -911,6 +926,7 @@ export const voiceToolHandlers: M1VoiceToolHandlers = {
         versionHash: document.version_hash ?? 'fixture-v1',
         fieldsFilled,
         document,
+        engine: 'fixture',
       };
     } else {
       throw new Error('The document engine is not available right now. The answers are saved; try again shortly.');

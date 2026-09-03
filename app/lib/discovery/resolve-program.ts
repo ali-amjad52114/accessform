@@ -142,11 +142,40 @@ async function appendCaseEvent(
   }
 }
 
+/** Candidates recorded on a feed event — enough for a timeline, not a dump. */
+const MAX_EVENT_CANDIDATES = 8;
+
+/** What the search step did, carried onto the discovery events for the timeline. */
+interface SearchTrace {
+  /** The templated queries that were (or would have been) sent to SerpApi. */
+  queries: string[];
+  candidates: ProgramCandidate[];
+  searches_used: number;
+}
+
+function traceMetadata(trace: SearchTrace): Record<string, unknown> {
+  return {
+    queries: trace.queries,
+    candidates: trace.candidates.slice(0, MAX_EVENT_CANDIDATES),
+    searches_used: trace.searches_used,
+  };
+}
+
+async function recordSearchStarted(caseId: Id | undefined, input: ResolveProgramInput, queries: string[]): Promise<void> {
+  await appendCaseEvent(caseId, {
+    actor: 'serpapi',
+    event_type: 'search_started',
+    message: `Searching official sources for ${describeRequest(input)}`,
+    metadata_json: { queries },
+  });
+}
+
 async function recordFound(
   caseId: Id | undefined,
   program: ResolvedProgram,
   organization: string,
   fromCatalog: boolean,
+  trace: SearchTrace,
 ): Promise<void> {
   await appendCaseEvent(caseId, {
     actor: 'serpapi',
@@ -159,6 +188,9 @@ async function recordFound(
       policy_url: program.policy_url,
       form_kind: program.form_kind,
       from_catalog: fromCatalog,
+      organization,
+      source_domain: program.source_domain,
+      ...traceMetadata(trace),
     },
   });
   await appendCaseEvent(caseId, {
@@ -177,8 +209,9 @@ async function recordFound(
 async function recordNotFound(
   caseId: Id | undefined,
   input: ResolveProgramInput,
-  searchesUsed: number,
   detail: string,
+  reason: string,
+  trace: SearchTrace,
 ): Promise<void> {
   await appendCaseEvent(caseId, {
     actor: 'serpapi',
@@ -188,8 +221,9 @@ async function recordNotFound(
       requested: input.organization ?? '',
       category: input.category,
       location: input.location ?? '',
-      searches_used: searchesUsed,
       detail,
+      reason,
+      ...traceMetadata(trace),
     },
   });
 }
@@ -417,6 +451,8 @@ interface LiveOutcome {
   organization_name: string;
   candidates: ProgramCandidate[];
   searches_used: number;
+  /** Queries sent to SerpApi (or the queries the replayed hits came from). */
+  queries: string[];
   detail: string;
 }
 
@@ -530,6 +566,7 @@ async function discoverLive(
     organization_name: '',
     candidates: [],
     searches_used: 0,
+    queries: [],
     detail: '',
   };
 
@@ -547,6 +584,7 @@ async function discoverLive(
   const seen = new Set<string>();
   if (options.hits) {
     for (const hit of options.hits) {
+      if (hit.query && !outcome.queries.includes(hit.query)) outcome.queries.push(hit.query);
       if (seen.has(hit.url)) continue;
       seen.add(hit.url);
       hits.push(hit);
@@ -562,6 +600,8 @@ async function discoverLive(
       return outcome;
     }
     const queries = buildDiscoveryQueries(input).slice(0, Math.min(MAX_LIVE_QUERIES_PER_CALL, budget.remaining));
+    outcome.queries = [...queries];
+    await recordSearchStarted(input.case_id, input, outcome.queries);
     for (const [index, query] of queries.entries()) {
       if (index > 0) await queryGap();
       try {
@@ -746,11 +786,18 @@ export async function resolveProgram(
   // 1. Catalog — zero searches.
   const catalog = await resolveFromCatalog(input);
   if (catalog.program) {
-    await recordFound(input.case_id, catalog.program, catalog.organization_name, true);
+    const candidates = [
+      candidateFromProgram(catalog.program, 'catalog: verified by downloading the PDF and reading its fields'),
+    ];
+    await recordFound(input.case_id, catalog.program, catalog.organization_name, true, {
+      queries: [],
+      candidates,
+      searches_used: 0,
+    });
     return {
       found: true,
       program: catalog.program,
-      candidates: [candidateFromProgram(catalog.program, 'catalog: verified by downloading the PDF and reading its fields')],
+      candidates,
       searches_used: 0,
       from_catalog: true,
     };
@@ -762,7 +809,11 @@ export async function resolveProgram(
 
   if (!input.organization && !input.location) {
     const reason = 'I need to know which city or county you are in to find the right program.';
-    await recordNotFound(input.case_id, input, 0, 'no organization or location');
+    await recordNotFound(input.case_id, input, 'no organization or location', reason, {
+      queries: [],
+      candidates: alternatives,
+      searches_used: 0,
+    });
     return { found: false, reason, candidates: alternatives, searches_used: 0, from_catalog: false };
   }
 
@@ -778,7 +829,11 @@ export async function resolveProgram(
   );
   if (live.program) {
     console.info(`[accessform] resolveProgram: ${live.detail}`);
-    await recordFound(input.case_id, live.program, live.organization_name, false);
+    await recordFound(input.case_id, live.program, live.organization_name, false, {
+      queries: live.queries,
+      candidates: live.candidates,
+      searches_used: live.searches_used,
+    });
     return {
       found: true,
       program: live.program,
@@ -789,11 +844,17 @@ export async function resolveProgram(
   }
 
   const detail = [catalog.reason, live.detail].filter(Boolean).join('; ');
-  await recordNotFound(input.case_id, input, live.searches_used, detail);
+  const reason = notFoundReason(input);
+  const candidates = live.candidates.length ? live.candidates : alternatives;
+  await recordNotFound(input.case_id, input, detail, reason, {
+    queries: live.queries,
+    candidates,
+    searches_used: live.searches_used,
+  });
   return {
     found: false,
-    reason: notFoundReason(input),
-    candidates: live.candidates.length ? live.candidates : alternatives,
+    reason,
+    candidates,
     searches_used: live.searches_used,
     from_catalog: false,
   };
